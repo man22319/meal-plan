@@ -1,0 +1,19 @@
+/* ══════════════════════════════════════════
+   VARIABLES — Design tokens & global reset
+══════════════════════════════════════════ */
+:root {
+  --bg: #0c0c0e;
+  --bg2: rgba(40, 40, 40, 0.4);
+  --bg3: rgba(60, 60, 60, 0.25);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-hi: rgba(255, 255, 255, 0.20);
+  --white: #ffffff;
+  --silver: #d1d1d6;
+  --muted: #8e8e93;
+  --dim: #48484a;
+  --red: rgba(200, 60, 50, 0.18);
+  --red-text: rgba(220, 80, 70, 0.9);
+  --green-text: rgba(180, 220, 180, 0.9);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

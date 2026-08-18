@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0c0c0e" />
+  <title>Macro Solver</title>
+  <meta name="description"
+    content="Client-side nutritional macro optimization calculator. Define targets, ingredients, and meal structure. The solver determines quantities." />
+  <link rel="icon" type="image/x-icon" href="assets/img/favicon.ico" />
+  <link rel="icon" type="image/jpeg" href="assets/img/icon.jpg" />
+  <link rel="apple-touch-icon" href="assets/img/icon.jpg" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=IBM+Plex+Mono:wght@400;500&family=Barlow:wght@300;400;500&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="./styles/base/main.css" />
+</head>
+
+<body>
+  <header>
+    <div class="wordmark">
+      <div class="brand-wrap">
+        <img class="header-logo-img" src="assets/img/icon.jpg"
+             onerror="this.onerror=null;if(!this.dataset.triedJpeg){this.dataset.triedJpeg=1;this.src='assets/img/icon.jpeg';}else{this.style.display='none';}"
+             alt="Macro Solver Logo" />
+        <div class="logo">Macro <span>Solver</span></div>
+      </div>
+      <div class="subtitle">Nutritional Optimization</div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ═══ DAILY TARGETS ═══ -->
+    <section class="section" id="targets-section">
+      <div class="section-header">Daily Targets</div>
+      <div class="card">
+        <div class="target-grid" id="target-fields"></div>
+      </div>
+    </section>
+
+    <!-- ═══ MEAL CONFIGURATION ═══ -->
+    <section class="section" id="meals-section">
+      <div class="section-header">Meals</div>
+      <div class="card">
+        <div class="meal-count-row">
+          <label for="meal-count">Count</label>
+          <input type="number" id="meal-count" value="3" min="1" max="20" step="1" inputmode="numeric" />
+        </div>
+        <div id="meal-rows"></div>
+        <div class="meal-total-row">
+          <span class="meal-total-label">Total</span>
+          <span class="meal-total-value" id="meal-total-value">100.0%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ INGREDIENTS ═══ -->
+    <section class="section" id="ingredients-section">
+      <div class="section-header">
+        <span>Ingredients</span>
+        <div class="section-header-actions">
+          <button class="btn btn-sm" id="import-btn">Import</button>
+          <button class="btn btn-sm" id="export-btn">Export</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ingredient-table-wrap">
+          <table class="ingredient-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th class="num-col">Serv</th>
+                <th>Unit</th>
+                <th class="num-col">Cal</th>
+                <th class="num-col">Pro</th>
+                <th class="num-col">Carb</th>
+                <th class="num-col">Fat</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="ingredient-tbody"></tbody>
+          </table>
+        </div>
+        <div class="ingredient-actions">
+          <button class="btn" id="add-ingredient-btn" style="flex:1;">+ Add</button>
+          <button class="btn btn-danger" id="clear-data-btn">Reset</button>
+        </div>
+      </div>
+      <input type="file" id="import-file-input" accept=".json,application/json" />
+    </section>
+
+    <!-- ═══ OPTIMIZATION SETTINGS ═══ -->
+    <section class="section" id="advanced-section">
+      <button class="advanced-toggle" id="advanced-toggle">
+        <span class="chevron">&#9654;</span>
+        Optimization Weights
+      </button>
+      <div class="advanced-body" id="advanced-body">
+        <div class="card">
+          <div class="weight-grid" id="weight-fields"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ SOLVE ═══ -->
+    <div class="solve-row">
+      <button class="btn btn-primary" id="solve-btn">SOLVE</button>
+    </div>
+
+    <!-- ═══ ERRORS ═══ -->
+    <section class="section hidden" id="error-section">
+      <div class="error-card">
+        <ul class="error-list" id="error-list"></ul>
+      </div>
+    </section>
+
+    <!-- ═══ RESULTS ═══ -->
+    <section class="section" id="results-section">
+      <div class="section-header">Results</div>
+      <div id="meal-result-cards"></div>
+      <div id="daily-summary"></div>
+      <div id="meal-allocation"></div>
+      <div class="approx-notice hidden" id="approx-notice"></div>
+    </section>
+  </main>
+
+  <div class="log-hint">Client-Side LP Solver · Offline Ready</div>
+
+  <script src="https://unpkg.com/javascript-lp-solver/prod/solver.js"></script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+
+</html>
