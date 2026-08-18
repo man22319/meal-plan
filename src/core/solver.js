@@ -65,7 +65,11 @@ export const Optimization = {
     // Invoke solver
     let raw;
     try {
-      raw = solver.Solve(model);
+      const solverInstance = typeof solver !== 'undefined' ? solver : (typeof window !== 'undefined' ? window.solver : null);
+      if (!solverInstance || typeof solverInstance.Solve !== 'function') {
+        throw new Error('LP Solver library is not loaded. Please ensure solver.js is included.');
+      }
+      raw = solverInstance.Solve(model);
     } catch (e) {
       return { errors: ['Solver error: ' + (e.message || 'unknown failure.')] };
     }
