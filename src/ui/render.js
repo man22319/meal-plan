@@ -156,7 +156,9 @@ export const UI = {
       return;
     }
 
-    container.innerHTML = state.ingredients.map((ing, i) => `
+    container.innerHTML = state.ingredients.map((ing, i) => {
+      const mode = ing.quantityMode === 'discrete' ? 'discrete' : 'continuous';
+      return `
       <div class="ingredient-card" data-i="${i}">
         <div class="ing-row ing-name-row">
           <input type="text" class="ing-name-input" value="${escAttr(ing.name)}" data-i="${i}" data-f="name" placeholder="Ingredient name" />
@@ -207,8 +209,26 @@ export const UI = {
                    data-i="${i}" data-f="maxServings" placeholder="5" inputmode="decimal" />
           </div>
         </div>
+
+        <div class="ing-mode-row">
+          <div class="ing-mode-header">
+            <label>Quantity Mode</label>
+            <span class="ing-mode-hint">${mode === 'discrete' ? 'Whole servings only' : 'Fractional servings allowed'}</span>
+          </div>
+          <div class="segmented-control" role="radiogroup" aria-label="Quantity Mode">
+            <button type="button" class="segmented-btn ${mode === 'discrete' ? 'active' : ''}"
+                    data-i="${i}" data-mode="discrete" role="radio" aria-checked="${mode === 'discrete'}">
+              Discrete
+            </button>
+            <button type="button" class="segmented-btn ${mode !== 'discrete' ? 'active' : ''}"
+                    data-i="${i}" data-mode="continuous" role="radio" aria-checked="${mode !== 'discrete'}">
+              Continuous
+            </button>
+          </div>
+        </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     container.querySelectorAll('input').forEach(input => {
       input.addEventListener('input', function () {
@@ -221,6 +241,16 @@ export const UI = {
           state.ingredients[idx][field] = isNaN(val) ? 0 : val;
         }
         Persistence.save();
+      });
+    });
+
+    container.querySelectorAll('.segmented-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(this.dataset.i, 10);
+        const mode = this.dataset.mode;
+        state.ingredients[idx].quantityMode = mode;
+        Persistence.save();
+        UI.renderIngredients();
       });
     });
 
@@ -237,7 +267,8 @@ export const UI = {
     state.ingredients.push({
       name: '', servingSize: 100, unit: 'g',
       calories: 0, protein: 0, carbs: 0, fat: 0,
-      minServings: 0, maxServings: 5
+      minServings: 0, maxServings: 5,
+      quantityMode: 'continuous'
     });
     Persistence.save();
     UI.renderIngredients();

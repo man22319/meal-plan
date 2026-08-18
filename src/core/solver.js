@@ -37,6 +37,8 @@ export const Optimization = {
                           (maxIngPerMeal > 0 && maxIngPerMeal < ingredients.length) ||
                           ingredients.some(ing => typeof ing.minServings === 'number' && ing.minServings > 0);
 
+    const hasDiscrete = ingredients.some(ing => ing.quantityMode === 'discrete');
+
     const model = {
       optimize: 'cost',
       opType: 'min',
@@ -50,6 +52,10 @@ export const Optimization = {
 
     if (needsBinaries) {
       model.binaries = {};
+    }
+
+    if (hasDiscrete) {
+      model.ints = {};
     }
 
     // 1. Daily macro constraints (with deviation variables dP and dM)
@@ -161,6 +167,11 @@ export const Optimization = {
           }
         }
 
+        if (ing.quantityMode === 'discrete') {
+          if (!model.ints) model.ints = {};
+          model.ints[v_x] = 1;
+        }
+
         model.variables[v_x] = xEntry;
       });
     });
@@ -193,15 +204,19 @@ export const Optimization = {
       let mCal = 0, mPro = 0, mCarb = 0, mFat = 0;
 
       ingredients.forEach((ing, i) => {
-        const s = raw[`x_${i}_${j}`] || 0;
+        let s = raw[`x_${i}_${j}`] || 0;
         const z = raw[`z_${i}_${j}`] || 0;
+        if (ing.quantityMode === 'discrete') {
+          s = Math.round(s);
+        }
         if (s > 0.001) {
           items.push({
             name: ing.name,
             quantity: s * ing.servingSize,
             unit: ing.unit,
             servings: s,
-            selected: z > 0.5
+            selected: z > 0.5,
+            quantityMode: ing.quantityMode || 'continuous'
           });
           mCal += s * ing.calories;
           mPro += s * ing.protein;

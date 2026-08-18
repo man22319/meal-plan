@@ -348,6 +348,75 @@ label {
   font-size: 0.75rem;
 }
 
+/* ── Quantity Mode Segmented Control ── */
+.ing-mode-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ing-mode-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.ing-mode-header label {
+  font-size: 0.55rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 0;
+}
+
+.ing-mode-hint {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.58rem;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+}
+
+.segmented-control {
+  display: flex;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.segmented-btn {
+  flex: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--dim);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 6px 10px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  text-align: center;
+  transition: all 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.segmented-btn:hover:not(.active) {
+  color: var(--silver);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.segmented-btn.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--white);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
 .ingredient-actions {
   display: flex;
   gap: 8px;

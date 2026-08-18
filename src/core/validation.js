@@ -87,6 +87,9 @@ export const Validation = {
       if (typeof ing.minServings === 'number' && typeof ing.maxServings === 'number' && ing.minServings > ing.maxServings) {
         errors.push(`"${label}": min servings (${ing.minServings}) cannot exceed max servings (${ing.maxServings}).`);
       }
+      if (typeof ing.quantityMode !== 'undefined' && ing.quantityMode !== 'continuous' && ing.quantityMode !== 'discrete') {
+        errors.push(`"${label}": quantity mode must be "continuous" or "discrete".`);
+      }
     });
     return errors;
   },

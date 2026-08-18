@@ -41,7 +41,8 @@ export const Persistence = {
               carbs: ing.carbs,
               fat: ing.fat,
               minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
-              maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5
+              maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5,
+              quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous'
             };
           }).filter(Boolean);
 
@@ -122,7 +123,8 @@ export const ImportExport = {
           carbs: ing.carbs,
           fat: ing.fat,
           minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
-          maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5
+          maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5,
+          quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous'
         }));
 
         if (parsed.mealConstraints && typeof parsed.mealConstraints === 'object') {
@@ -204,6 +206,9 @@ export const ImportExport = {
       }
       if (typeof ing.minServings === 'number' && typeof ing.maxServings === 'number' && ing.minServings > ing.maxServings) {
         errors.push(`"${label}": minServings cannot exceed maxServings.`);
+      }
+      if (typeof ing.quantityMode !== 'undefined' && ing.quantityMode !== 'continuous' && ing.quantityMode !== 'discrete') {
+        errors.push(`"${label}": quantityMode must be "continuous" or "discrete".`);
       }
     });
     return errors;

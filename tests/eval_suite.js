@@ -19,6 +19,8 @@ global.solver = solverSandbox.solver;
 
 import { Optimization } from '../src/core/solver.js';
 import { state } from '../src/core/state.js';
+import { Validation } from '../src/core/validation.js';
+import { ImportExport } from '../src/io/persistence.js';
 
 // Base nutritional target
 export const DAILY_TARGET = {
@@ -487,6 +489,150 @@ export function runAdversarialSuite() {
   return adversarialResults;
 }
 
+/**
+ * Quantity Mode Test Suite: Discrete vs Continuous Variable Domains
+ */
+export function runQuantityModeTestSuite() {
+  console.log('═══════════════════════════════════════════════════════════════════════');
+  console.log(' RUNNING QUANTITY MODE TEST SUITE (DISCRETE VS CONTINUOUS)           ');
+  console.log('═══════════════════════════════════════════════════════════════════════\n');
+
+  const results = [];
+
+  // QM-1: Pure discrete ingredients produce strictly integer servings
+  {
+    state.targets = { calories: 800, protein: 70, carbs: 80, fat: 20 };
+    state.meals = [{ name: 'Meal 1', pct: 100 }];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.penalties = { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 };
+    state.ingredients = [
+      { name: 'Eggs', servingSize: 50, unit: 'g', calories: 72, protein: 6.3, carbs: 0.4, fat: 4.8, minServings: 0, maxServings: 5, quantityMode: 'discrete' },
+      { name: 'Bread Slice', servingSize: 40, unit: 'g', calories: 100, protein: 4, carbs: 20, fat: 1, minServings: 0, maxServings: 5, quantityMode: 'discrete' },
+      { name: 'Chicken Breast', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, quantityMode: 'discrete' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result ? outcome.result.mealResults[0].items : [];
+    const allDiscreteInteger = items.length > 0 && items.every(item => Number.isInteger(item.servings) && item.servings >= 0);
+
+    console.log(`[QM-1] Pure Discrete Ingredients (Whole Servings Only):`);
+    items.forEach(i => console.log(`       - ${i.name}: ${i.servings} serv (${i.quantity} ${i.unit})`));
+    console.log(`       Status: ${allDiscreteInteger ? 'PASSED (All servings are strictly integer)' : 'FAILED'}\n`);
+    results.push({ name: 'QM-1: Pure Discrete', passed: allDiscreteInteger });
+  }
+
+  // QM-2: Continuous ingredients produce fractional servings when needed
+  {
+    state.targets = { calories: 532, protein: 42.5, carbs: 62.1, fat: 11.2 };
+    state.meals = [{ name: 'Meal 1', pct: 100 }];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 3 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.penalties = { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 };
+    state.ingredients = [
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, quantityMode: 'continuous' },
+      { name: 'Yuca', servingSize: 103, unit: 'g', calories: 180, protein: 3, carbs: 42, fat: 0, minServings: 0, maxServings: 5, quantityMode: 'continuous' },
+      { name: 'Milk', servingSize: 240, unit: 'mL', calories: 150, protein: 8, carbs: 12, fat: 8, minServings: 0, maxServings: 2, quantityMode: 'continuous' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result ? outcome.result.mealResults[0].items : [];
+    const hasFractional = items.some(item => !Number.isInteger(item.servings));
+
+    console.log(`[QM-2] Pure Continuous Ingredients (Fractional Servings Allowed):`);
+    items.forEach(i => console.log(`       - ${i.name}: ${i.servings.toFixed(2)} serv (${i.quantity.toFixed(1)} ${i.unit})`));
+    console.log(`       Status: ${hasFractional ? 'PASSED (Fractional continuous servings generated)' : 'FAILED'}\n`);
+    results.push({ name: 'QM-2: Pure Continuous', passed: hasFractional });
+  }
+
+  // QM-3: Mixed Discrete & Continuous Ingredients
+  {
+    state.targets = { calories: 750, protein: 55, carbs: 70, fat: 22 };
+    state.meals = [{ name: 'Meal 1', pct: 100 }];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.penalties = { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 };
+    state.ingredients = [
+      { name: 'Eggs', servingSize: 50, unit: 'g', calories: 72, protein: 6.3, carbs: 0.4, fat: 4.8, minServings: 0, maxServings: 4, quantityMode: 'discrete' },
+      { name: 'Pita', servingSize: 60, unit: 'g', calories: 165, protein: 5.5, carbs: 33, fat: 1, minServings: 0, maxServings: 3, quantityMode: 'discrete' },
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, quantityMode: 'continuous' },
+      { name: 'Olive Oil', servingSize: 15, unit: 'mL', calories: 120, protein: 0, carbs: 0, fat: 14, minServings: 0, maxServings: 2, quantityMode: 'continuous' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result ? outcome.result.mealResults[0].items : [];
+    const eggs = items.find(i => i.name === 'Eggs');
+    const pita = items.find(i => i.name === 'Pita');
+
+    const discreteValid = (!eggs || Number.isInteger(eggs.servings)) && (!pita || Number.isInteger(pita.servings));
+    const continuousValid = items.length > 0;
+    const passed = discreteValid && continuousValid;
+
+    console.log(`[QM-3] Mixed Discrete/Continuous Set:`);
+    items.forEach(i => console.log(`       - ${i.name} (${i.quantityMode}): ${Number.isInteger(i.servings) ? i.servings : i.servings.toFixed(2)} serv`));
+    console.log(`       Status: ${passed ? 'PASSED (Discrete are integers, continuous allowed fractional)' : 'FAILED'}\n`);
+    results.push({ name: 'QM-3: Mixed Discrete/Continuous', passed });
+  }
+
+  // QM-4: Discrete Serving Bounds (Min & Max Servings)
+  {
+    state.targets = { calories: 600, protein: 40, carbs: 50, fat: 15 };
+    state.meals = [{ name: 'Meal 1', pct: 100 }];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 3 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.penalties = { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 };
+    state.ingredients = [
+      { name: 'Eggs', servingSize: 50, unit: 'g', calories: 72, protein: 6.3, carbs: 0.4, fat: 4.8, minServings: 2, maxServings: 3, quantityMode: 'discrete' },
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, quantityMode: 'continuous' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result ? outcome.result.mealResults[0].items : [];
+    const eggs = items.find(i => i.name === 'Eggs');
+    const passed = eggs && Number.isInteger(eggs.servings) && eggs.servings >= 2 && eggs.servings <= 3;
+
+    console.log(`[QM-4] Discrete Serving Bounds (Eggs min=2, max=3):`);
+    console.log(`       Result: Eggs = ${eggs ? eggs.servings : 0} serv`);
+    console.log(`       Status: ${passed ? 'PASSED (Discrete bounds strictly satisfied)' : 'FAILED'}\n`);
+    results.push({ name: 'QM-4: Discrete Bounds', passed });
+  }
+
+  // QM-5: Validation & Backward Compatibility
+  {
+    state.ingredients = [
+      { name: 'Old Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2 },
+      { name: 'Discrete Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, quantityMode: 'discrete' }
+    ];
+    const validationErrors = Validation.validateIngredients();
+
+    const testValid = ImportExport._validate({
+      ingredients: [
+        { name: 'Old Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2 },
+        { name: 'Discrete Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, quantityMode: 'discrete' }
+      ]
+    });
+    const testInvalid = ImportExport._validate({
+      ingredients: [
+        { name: 'Bad Mode Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, quantityMode: 'invalid_mode' }
+      ]
+    });
+
+    const passed = validationErrors.length === 0 && testValid.length === 0 && testInvalid.length > 0;
+    console.log(`[QM-5] Schema Validation & Backward Compatibility:`);
+    console.log(`       Valid legacy/discrete check: errors=${testValid.length}`);
+    console.log(`       Invalid mode check: errors=${testInvalid.length} (${testInvalid[0] || ''})`);
+    console.log(`       Status: ${passed ? 'PASSED (Backward compatibility and validation verified)' : 'FAILED'}\n`);
+    results.push({ name: 'QM-5: Validation & Backward Compatibility', passed });
+  }
+
+  const allPassed = results.every(r => r.passed);
+  if (!allPassed) {
+    console.error('ERROR: Some quantity mode tests failed!');
+    process.exitCode = 1;
+  }
+  return results;
+}
+
 // If run directly
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const allResults = runEvaluationSuite();
@@ -517,6 +663,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   // Run Adversarial Test Suite
   runAdversarialSuite();
+
+  // Run Quantity Mode Test Suite
+  runQuantityModeTestSuite();
 
   console.log('\n');
   const sim = runMealSplitSimulations();
