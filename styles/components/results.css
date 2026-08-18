@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════
-   RESULTS — meal cards, daily summary,
-   deviation, allocation table
+   RESULTS — meal cards, consolidated daily summary,
+   dominant calorie hierarchy
 ══════════════════════════════════════════ */
 
 #results-section {
@@ -31,15 +31,13 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 8px;
+  padding-bottom: 4px;
 }
 
 .result-meal-name {
   font-family: 'Barlow Condensed', sans-serif;
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 1.05rem;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--white);
@@ -47,16 +45,50 @@
 
 .result-meal-pct {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.65rem;
-  color: var(--dim);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--silver);
   letter-spacing: 1px;
+}
+
+/* Visually dominant calorie readout */
+.result-meal-calories {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.result-cal-actual {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 600;
+  font-size: 1.35rem;
+  letter-spacing: 1px;
+  color: var(--white);
+  line-height: 1;
+}
+
+.result-cal-target {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--dim);
+}
+
+.result-ingredients-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 6px;
 }
 
 .result-ingredient-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 4px 0;
+  padding: 3px 0;
 }
 
 .result-ingredient-name {
@@ -82,47 +114,46 @@
   margin-left: 4px;
 }
 
+/* Subordinate meal macros strip */
 .result-meal-macros {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0;
+  justify-content: space-around;
 }
 
 .result-macro-item {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.6rem;
-  color: var(--dim);
-  letter-spacing: 0.3px;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-}
-
-.result-macro-item .val {
-  font-size: 0.75rem;
-  color: var(--white);
-  font-weight: 500;
-  line-height: 1.3;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .result-macro-item .lbl {
-  font-size: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.result-macro-item .val {
+  font-size: 0.8rem;
+  color: var(--white);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-macro-item .val .unit {
+  font-size: 0.72rem;
   color: var(--dim);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  line-height: 1;
-  margin-top: 1px;
+  margin-left: 4px;
 }
 
 .result-macro-divider {
   width: 1px;
-  height: 20px;
+  height: 14px;
   background: var(--border);
   flex-shrink: 0;
 }
@@ -134,7 +165,7 @@
   padding: 4px 0;
 }
 
-/* ── Summary Cards ── */
+/* ── Consolidated Summary Card ── */
 .summary-card {
   background: rgba(255, 255, 255, 0.04);
   -webkit-backdrop-filter: blur(20px);
@@ -160,78 +191,76 @@
   border-bottom: 1px solid var(--border);
 }
 
-.summary-row {
+.consolidated-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.consolidated-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 4px 0;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.summary-label {
+.consolidated-row:last-child {
+  border-bottom: none;
+}
+
+.macro-name {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.65rem;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--dim);
+  min-width: 55px;
 }
 
-.summary-value {
+.macro-values {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--white);
+  font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
-}
-
-.summary-value .target {
-  color: var(--dim);
-}
-
-/* ── Deviation colors ── */
-.deviation-pos { color: var(--green-text); }
-.deviation-neg { color: var(--red-text); }
-.deviation-zero { color: var(--dim); }
-
-/* ── Allocation Table ── */
-.alloc-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.alloc-table th {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.5rem;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: var(--dim);
-  text-align: left;
-  padding: 0 4px 6px;
-  font-weight: 500;
-  border-bottom: 1px solid var(--border);
-}
-
-.alloc-table th.num-col { text-align: right; }
-
-.alloc-table td {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.7rem;
-  padding: 6px 4px;
-  border-bottom: 1px solid var(--border);
-  color: var(--silver);
-  font-variant-numeric: tabular-nums;
-}
-
-.alloc-table td.num-col {
   text-align: right;
+}
+
+.macro-actual {
   color: var(--white);
   font-weight: 500;
 }
 
-.alloc-table tr:last-child td { border-bottom: none; }
+.macro-target,
+.macro-slash {
+  color: var(--dim);
+}
 
-.alloc-table .meal-name-col {
-  color: var(--muted);
-  letter-spacing: 0.5px;
+.macro-dev {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.74rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.macro-dev-pct {
+  font-size: 0.62rem;
+  opacity: 0.85;
+}
+
+/* ── Deviation colors: any error/deviation is red, zero is neutral dim ── */
+.deviation-error,
+.deviation-pos,
+.deviation-neg {
+  color: var(--red-text);
+}
+
+.deviation-zero {
+  color: var(--dim);
 }
 
 /* ── Approximate notice ── */
@@ -243,3 +272,4 @@
   text-align: center;
   margin-top: 6px;
 }
+

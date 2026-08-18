@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════
    INPUTS — form fields, buttons, labels,
-   target grid, meal rows, ingredient table,
+   target grid, meal rows, ingredient cards,
    advanced/collapsible, error states
 ══════════════════════════════════════════ */
 
@@ -8,7 +8,7 @@
 input[type="text"],
 input[type="number"],
 select {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--white);
@@ -69,20 +69,29 @@ label {
   flex-direction: column;
 }
 
-.target-field .unit-hint {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.55rem;
-  color: var(--dim);
-  margin-top: 3px;
+.target-field label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.62rem;
+}
+
+.target-field label .target-unit {
+  font-size: 0.62rem;
+  color: var(--muted);
   letter-spacing: 0.5px;
+  text-transform: none;
 }
 
 /* ── Meal Configuration ── */
 .meal-count-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
 }
 
 .meal-count-row label {
@@ -90,9 +99,55 @@ label {
   flex-shrink: 0;
 }
 
-.meal-count-row input {
-  width: 60px;
+.stepper-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stepper-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--white);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  font-weight: 500;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  border-color: var(--border-hi);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stepper-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  transform: scale(0.96);
+}
+
+.stepper-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--white);
+  min-width: 24px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .meal-row {
@@ -107,7 +162,7 @@ label {
   border-bottom: none;
 }
 
-.meal-row input[type="text"] {
+.meal-name-input {
   flex: 1;
   min-width: 0;
 }
@@ -119,16 +174,27 @@ label {
   flex-shrink: 0;
 }
 
-.meal-pct-wrap input[type="number"] {
-  width: 56px;
+.meal-pct-input {
+  width: 52px;
   text-align: right;
-  padding-right: 6px;
+  padding-right: 4px;
 }
 
 .pct-suffix {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.7rem;
   color: var(--dim);
+}
+
+.meal-kcal-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--silver);
+  font-variant-numeric: tabular-nums;
+  min-width: 68px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 .meal-total-row {
@@ -162,65 +228,33 @@ label {
 .meal-total-value.valid { color: var(--white); }
 .meal-total-value.invalid { color: var(--red-text); }
 
-/* ── Ingredient Table ── */
-.ingredient-table-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  margin: 0 -16px;
-  padding: 0 16px;
+/* ── Stacked Mobile Ingredient Cards ── */
+.ingredient-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.ingredient-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 660px;
+.ingredient-card {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.ingredient-table th {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.5rem;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: var(--dim);
-  text-align: left;
-  padding: 0 2px 6px;
+.ing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ing-name-row .ing-name-input {
+  flex: 1;
+  font-size: 0.85rem;
   font-weight: 500;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.ingredient-table th.num-col { text-align: right; }
-
-.ingredient-table td {
-  padding: 4px 2px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-}
-
-.ingredient-table tr:last-child td { border-bottom: none; }
-
-.ingredient-table input[type="text"] {
-  min-width: 80px;
-  font-size: 0.75rem;
-  padding: 6px 8px;
-}
-
-.ingredient-table input[type="number"] {
-  width: 56px;
-  text-align: right;
-  font-size: 0.75rem;
-  padding: 6px 6px;
-}
-
-.ingredient-table .unit-input {
-  width: 44px;
-  font-size: 0.75rem;
-  padding: 6px 6px;
-}
-
-.ingredient-table .del-cell {
-  width: 28px;
-  text-align: center;
 }
 
 .del-btn {
@@ -228,15 +262,20 @@ label {
   border: 1px solid transparent;
   color: var(--dim);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.85rem;
+  font-size: 1.1rem;
   cursor: pointer;
-  padding: 6px 8px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 6px;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
   line-height: 1;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   touch-action: manipulation;
+  flex-shrink: 0;
 }
 
 .del-btn:hover {
@@ -248,10 +287,94 @@ label {
   background: rgba(200, 30, 30, 0.08);
 }
 
+.ing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ing-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.ing-field label {
+  font-size: 0.55rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+
+.ing-field input {
+  font-size: 0.75rem;
+  padding: 6px 8px;
+}
+
+.ing-macros-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ing-macro-header {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.ing-macro-header span {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.52rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-align: right;
+  padding-right: 2px;
+}
+
+.ing-macro-inputs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.ing-macro-inputs input {
+  text-align: right;
+  padding: 6px 6px;
+  font-size: 0.75rem;
+}
+
 .ingredient-actions {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* ── Empty State ── */
+.empty-state {
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.empty-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--silver);
+  margin-bottom: 4px;
+}
+
+.empty-desc {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--dim);
+  letter-spacing: 0.5px;
 }
 
 /* ── Buttons ── */
@@ -274,15 +397,21 @@ label {
   touch-action: manipulation;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   border-color: var(--border-hi);
   color: var(--white);
   background: rgba(255, 255, 255, 0.06);
 }
 
-.btn:active {
+.btn:active:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
   transform: scale(0.97);
+}
+
+.btn:disabled,
+.btn.btn-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .btn-primary {
@@ -301,24 +430,20 @@ label {
   transition: all 0.15s ease;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: transparent;
   color: var(--white);
 }
 
-.btn-primary:active {
+.btn-primary:active:not(:disabled) {
   transform: scale(0.98);
 }
 
-.btn-danger {
-  color: var(--red-text);
-  border-color: rgba(200, 60, 50, 0.2);
-}
-
-.btn-danger:hover {
-  color: #ff3b3b;
-  border-color: rgba(220, 60, 60, 0.4);
-  background: rgba(200, 30, 30, 0.06);
+.btn-primary:disabled,
+.btn-primary.btn-disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--dim);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .btn-sm {
@@ -414,9 +539,3 @@ label {
   display: none;
 }
 
-/* ── Responsive: small phones ── */
-@media (max-width: 380px) {
-  .ingredient-table { min-width: 520px; }
-  .ingredient-table input[type="text"] { min-width: 70px; }
-  .ingredient-table input[type="number"] { width: 48px; }
-}

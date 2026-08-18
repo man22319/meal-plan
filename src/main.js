@@ -77,19 +77,19 @@ function setupEventListeners() {
     toggle.classList.toggle('open', !!isOpen);
   });
 
-  // Meal count
-  const countInput = document.getElementById('meal-count');
-  countInput?.addEventListener('input', () => {
-    let count = parseInt(countInput.value, 10);
-    if (isNaN(count) || count < 1) count = 1;
-    if (count > 20) count = 20;
-    while (state.meals.length < count) {
-      state.meals.push({ name: `Meal ${state.meals.length + 1}`, pct: 0 });
-    }
-    while (state.meals.length > count) {
+  // Meal count stepper
+  document.getElementById('meal-count-dec')?.addEventListener('click', () => {
+    if (state.meals.length > 1) {
       state.meals.pop();
+      UI.renderMeals();
     }
-    UI.renderMealRows();
+  });
+
+  document.getElementById('meal-count-inc')?.addEventListener('click', () => {
+    if (state.meals.length < 6) {
+      state.meals.push({ name: `Meal ${state.meals.length + 1}`, pct: 0 });
+      UI.renderMeals();
+    }
   });
 }
 

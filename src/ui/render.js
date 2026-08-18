@@ -5,6 +5,8 @@
 import { state } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 
+const EPSILON = 0.001;
+
 export function esc(str) {
   const d = document.createElement('div');
   d.textContent = String(str);
@@ -33,11 +35,10 @@ export const UI = {
 
     container.innerHTML = fields.map(f => `
       <div class="target-field">
-        <label for="target-${f.key}">${f.label}</label>
+        <label for="target-${f.key}">${f.label} <span class="target-unit">(${f.unit})</span></label>
         <input type="number" id="target-${f.key}"
                value="${state.targets[f.key]}"
                min="0" step="1" inputmode="numeric" />
-        <span class="unit-hint">${f.unit}</span>
       </div>
     `).join('');
 
@@ -47,6 +48,9 @@ export const UI = {
         input.addEventListener('input', function () {
           const val = parseFloat(this.value);
           state.targets[f.key] = isNaN(val) ? 0 : val;
+          if (f.key === 'calories') {
+            UI.updateMealKcals();
+          }
         });
       }
     });
@@ -54,10 +58,15 @@ export const UI = {
 
   // ── MEALS ──
   renderMeals() {
-    const countInput = document.getElementById('meal-count');
-    if (countInput) {
-      countInput.value = state.meals.length;
+    const countDisplay = document.getElementById('meal-count-display');
+    if (countDisplay) {
+      countDisplay.textContent = state.meals.length;
     }
+    const decBtn = document.getElementById('meal-count-dec');
+    const incBtn = document.getElementById('meal-count-inc');
+    if (decBtn) decBtn.disabled = state.meals.length <= 1;
+    if (incBtn) incBtn.disabled = state.meals.length >= 6;
+
     UI.renderMealRows();
   },
 
@@ -65,17 +74,23 @@ export const UI = {
     const container = document.getElementById('meal-rows');
     if (!container) return;
 
-    container.innerHTML = state.meals.map((m, i) => `
-      <div class="meal-row">
-        <input type="text" value="${escAttr(m.name)}" data-idx="${i}" data-f="name"
-               placeholder="Meal name" />
-        <div class="meal-pct-wrap">
-          <input type="number" value="${m.pct}" min="0" max="100" step="1"
-                 data-idx="${i}" data-f="pct" inputmode="numeric" />
-          <span class="pct-suffix">%</span>
+    const dailyCal = state.targets.calories || 0;
+
+    container.innerHTML = state.meals.map((m, i) => {
+      const mealKcal = Math.round(dailyCal * ((m.pct || 0) / 100));
+      return `
+        <div class="meal-row" data-idx="${i}">
+          <input type="text" class="meal-name-input" value="${escAttr(m.name)}" data-idx="${i}" data-f="name"
+                 placeholder="Meal name" />
+          <div class="meal-pct-wrap">
+            <input type="number" class="meal-pct-input" value="${m.pct}" min="0" max="100" step="1"
+                   data-idx="${i}" data-f="pct" inputmode="numeric" aria-label="Meal percentage" />
+            <span class="pct-suffix">%</span>
+          </div>
+          <div class="meal-kcal-val" data-idx="${i}">${mealKcal} kcal</div>
         </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     container.querySelectorAll('input').forEach(input => {
       input.addEventListener('input', function () {
@@ -85,53 +100,117 @@ export const UI = {
         } else {
           const val = parseFloat(this.value);
           state.meals[idx].pct = isNaN(val) ? 0 : val;
+          UI.updateMealKcals();
+          UI.updateMealTotal();
         }
-        UI.updateMealTotal();
       });
     });
 
     UI.updateMealTotal();
   },
 
+  updateMealKcals() {
+    const dailyCal = state.targets.calories || 0;
+    state.meals.forEach((m, i) => {
+      const el = document.querySelector(`.meal-kcal-val[data-idx="${i}"]`);
+      if (el) {
+        const kcal = Math.round(dailyCal * ((m.pct || 0) / 100));
+        el.textContent = `${kcal} kcal`;
+      }
+    });
+  },
+
   updateMealTotal() {
     const total = state.meals.reduce((sum, m) => sum + (m.pct || 0), 0);
+    const isValid = Math.abs(total - 100) < EPSILON;
     const el = document.getElementById('meal-total-value');
-    if (!el) return;
-    el.textContent = `${total.toFixed(1)}%`;
-    el.className = 'meal-total-value ' + (Math.abs(total - 100) < 0.01 ? 'valid' : 'invalid');
+    if (el) {
+      el.textContent = `${total.toFixed(1)}%`;
+      el.className = 'meal-total-value ' + (isValid ? 'valid' : 'invalid');
+    }
+
+    const solveBtn = document.getElementById('solve-btn');
+    if (solveBtn) {
+      solveBtn.disabled = !isValid;
+      solveBtn.classList.toggle('btn-disabled', !isValid);
+      if (!isValid) {
+        solveBtn.setAttribute('title', 'Total meal allocation must equal 100%');
+      } else {
+        solveBtn.removeAttribute('title');
+      }
+    }
   },
 
   // ── INGREDIENTS ──
   renderIngredients() {
-    const tbody = document.getElementById('ingredient-tbody');
-    if (!tbody) return;
+    const container = document.getElementById('ingredient-list');
+    if (!container) return;
 
-    tbody.innerHTML = state.ingredients.map((ing, i) => `
-      <tr>
-        <td><input type="text" value="${escAttr(ing.name)}" data-i="${i}" data-f="name" placeholder="Name" /></td>
-        <td><input type="number" value="${ing.servingSize}" min="0" step="1"
-                   data-i="${i}" data-f="servingSize" inputmode="decimal" /></td>
-        <td><input type="text" class="unit-input" value="${escAttr(ing.unit)}"
-                   data-i="${i}" data-f="unit" placeholder="g" /></td>
-        <td><input type="number" value="${ing.calories}" min="0" step="1"
-                   data-i="${i}" data-f="calories" inputmode="decimal" /></td>
-        <td><input type="number" value="${ing.protein}" min="0" step="0.1"
-                   data-i="${i}" data-f="protein" inputmode="decimal" /></td>
-        <td><input type="number" value="${ing.carbs}" min="0" step="0.1"
-                   data-i="${i}" data-f="carbs" inputmode="decimal" /></td>
-        <td><input type="number" value="${ing.fat}" min="0" step="0.1"
-                   data-i="${i}" data-f="fat" inputmode="decimal" /></td>
-        <td><input type="number" value="${typeof ing.minServings === 'number' ? ing.minServings : 0}" min="0" step="0.5"
-                   data-i="${i}" data-f="minServings" placeholder="0" inputmode="decimal" /></td>
-        <td><input type="number" value="${typeof ing.maxServings === 'number' ? ing.maxServings : 5}" min="0.1" step="0.5"
-                   data-i="${i}" data-f="maxServings" placeholder="5" inputmode="decimal" /></td>
-        <td class="del-cell">
-          <button class="del-btn" data-del="${i}" title="Delete">&times;</button>
-        </td>
-      </tr>
+    if (state.ingredients.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-title">No ingredients</div>
+          <div class="empty-desc">Add an ingredient or import a JSON database.</div>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = state.ingredients.map((ing, i) => `
+      <div class="ingredient-card" data-i="${i}">
+        <div class="ing-row ing-name-row">
+          <input type="text" class="ing-name-input" value="${escAttr(ing.name)}" data-i="${i}" data-f="name" placeholder="Ingredient name" />
+          <button type="button" class="del-btn" data-del="${i}" aria-label="Delete ingredient" title="Delete">×</button>
+        </div>
+
+        <div class="ing-grid ing-serving-grid">
+          <div class="ing-field">
+            <label for="ing-${i}-serv">Serving size</label>
+            <input type="number" id="ing-${i}-serv" value="${ing.servingSize}" min="0" step="1"
+                   data-i="${i}" data-f="servingSize" inputmode="decimal" />
+          </div>
+          <div class="ing-field">
+            <label for="ing-${i}-unit">Unit</label>
+            <input type="text" id="ing-${i}-unit" class="unit-input" value="${escAttr(ing.unit)}"
+                   data-i="${i}" data-f="unit" placeholder="g" />
+          </div>
+        </div>
+
+        <div class="ing-macros-wrap">
+          <div class="ing-macro-header">
+            <span>Calories</span>
+            <span>Protein</span>
+            <span>Carbs</span>
+            <span>Fat</span>
+          </div>
+          <div class="ing-macro-inputs">
+            <input type="number" aria-label="Calories" value="${ing.calories}" min="0" step="1"
+                   data-i="${i}" data-f="calories" inputmode="decimal" />
+            <input type="number" aria-label="Protein" value="${ing.protein}" min="0" step="0.1"
+                   data-i="${i}" data-f="protein" inputmode="decimal" />
+            <input type="number" aria-label="Carbs" value="${ing.carbs}" min="0" step="0.1"
+                   data-i="${i}" data-f="carbs" inputmode="decimal" />
+            <input type="number" aria-label="Fat" value="${ing.fat}" min="0" step="0.1"
+                   data-i="${i}" data-f="fat" inputmode="decimal" />
+          </div>
+        </div>
+
+        <div class="ing-grid ing-bounds-grid">
+          <div class="ing-field">
+            <label for="ing-${i}-min">Min servings</label>
+            <input type="number" id="ing-${i}-min" value="${typeof ing.minServings === 'number' ? ing.minServings : 0}" min="0" step="0.5"
+                   data-i="${i}" data-f="minServings" placeholder="0" inputmode="decimal" />
+          </div>
+          <div class="ing-field">
+            <label for="ing-${i}-max">Max servings</label>
+            <input type="number" id="ing-${i}-max" value="${typeof ing.maxServings === 'number' ? ing.maxServings : 5}" min="0.1" step="0.5"
+                   data-i="${i}" data-f="maxServings" placeholder="5" inputmode="decimal" />
+          </div>
+        </div>
+      </div>
     `).join('');
 
-    tbody.querySelectorAll('input').forEach(input => {
+    container.querySelectorAll('input').forEach(input => {
       input.addEventListener('input', function () {
         const idx = parseInt(this.dataset.i, 10);
         const field = this.dataset.f;
@@ -145,7 +224,7 @@ export const UI = {
       });
     });
 
-    tbody.querySelectorAll('.del-btn').forEach(btn => {
+    container.querySelectorAll('.del-btn').forEach(btn => {
       btn.addEventListener('click', function () {
         state.ingredients.splice(parseInt(this.dataset.del, 10), 1);
         Persistence.save();
@@ -162,10 +241,10 @@ export const UI = {
     });
     Persistence.save();
     UI.renderIngredients();
-    const rows = document.getElementById('ingredient-tbody')?.querySelectorAll('tr');
-    if (rows && rows.length > 0) {
-      const last = rows[rows.length - 1];
-      const nameInput = last.querySelector('input[data-f="name"]');
+    const cards = document.getElementById('ingredient-list')?.querySelectorAll('.ingredient-card');
+    if (cards && cards.length > 0) {
+      const last = cards[cards.length - 1];
+      const nameInput = last.querySelector('.ing-name-input');
       if (nameInput) nameInput.focus();
     }
   },
@@ -238,28 +317,29 @@ export const UI = {
           <div class="result-card">
             <div class="result-card-header">
               <span class="result-meal-name">${esc(meal.name)}</span>
-              <span class="result-meal-pct">${meal.pct}% (${Math.round(meal.targetCalories)} kcal target)</span>
+              <span class="result-meal-pct">${meal.pct}%</span>
             </div>
-            ${itemsHTML}
+            <div class="result-meal-calories">
+              <span class="result-cal-actual">${Math.round(meal.calories)}</span>
+              <span class="result-cal-target">/ ${Math.round(meal.targetCalories)} kcal</span>
+            </div>
+            <div class="result-ingredients-list">
+              ${itemsHTML}
+            </div>
             <div class="result-meal-macros">
               <span class="result-macro-item">
-                <span class="val">${Math.round(meal.calories)}</span>
-                <span class="lbl">kcal</span>
+                <span class="lbl">P</span>
+                <span class="val">${meal.protein.toFixed(1)}<span class="unit">g</span></span>
               </span>
               <span class="result-macro-divider"></span>
               <span class="result-macro-item">
-                <span class="val">${meal.protein.toFixed(1)}</span>
-                <span class="lbl">protein</span>
+                <span class="lbl">C</span>
+                <span class="val">${meal.carbs.toFixed(1)}<span class="unit">g</span></span>
               </span>
               <span class="result-macro-divider"></span>
               <span class="result-macro-item">
-                <span class="val">${meal.carbs.toFixed(1)}</span>
-                <span class="lbl">carbs</span>
-              </span>
-              <span class="result-macro-divider"></span>
-              <span class="result-macro-item">
-                <span class="val">${meal.fat.toFixed(1)}</span>
-                <span class="lbl">fat</span>
+                <span class="lbl">F</span>
+                <span class="val">${meal.fat.toFixed(1)}<span class="unit">g</span></span>
               </span>
             </div>
           </div>
@@ -267,7 +347,7 @@ export const UI = {
       }).join('');
     }
 
-    // Daily summary
+    // Consolidated Daily Summary + Deviation
     const macroLabels = [
       { key: 'calories', label: 'Calories', unit: 'kcal', round: true },
       { key: 'protein', label: 'Protein', unit: 'g', round: false },
@@ -275,27 +355,26 @@ export const UI = {
       { key: 'fat', label: 'Fat', unit: 'g', round: false }
     ];
 
-    const totalRows = macroLabels.map(m => {
+    const summaryRows = macroLabels.map(m => {
       const actual = m.round ? Math.round(r.totals[m.key]) : r.totals[m.key].toFixed(1);
-      return `
-        <div class="summary-row">
-          <span class="summary-label">${m.label}</span>
-          <span class="summary-value">${actual} <span class="target">/ ${state.targets[m.key]} ${m.unit}</span></span>
-        </div>
-      `;
-    }).join('');
-
-    const devRows = macroLabels.map(m => {
+      const target = state.targets[m.key];
       const dev = r.deviations[m.key];
-      const absVal = m.round ? Math.round(dev.absolute) : dev.absolute.toFixed(1);
-      const sign = dev.absolute >= 0 ? '+' : '';
-      const pct = dev.percentage.toFixed(1);
-      const cls = Math.abs(dev.absolute) < 0.05 ? 'deviation-zero'
-        : dev.absolute > 0 ? 'deviation-pos' : 'deviation-neg';
+      const absVal = m.round ? Math.abs(Math.round(dev.absolute)) : Math.abs(dev.absolute).toFixed(1);
+      const sign = dev.absolute > 0.001 ? '+' : dev.absolute < -0.001 ? '-' : '';
+      const pctVal = Math.abs(dev.percentage).toFixed(1);
+      const isZero = Math.abs(dev.absolute) < (m.round ? 1 : 0.05);
+      const cls = isZero ? 'deviation-zero' : 'deviation-error';
+      const devFormatted = isZero ? `0${m.unit} (0.0%)` : `${sign}${absVal}${m.unit} (${sign}${pctVal}%)`;
+
       return `
-        <div class="summary-row">
-          <span class="summary-label">${m.label}</span>
-          <span class="summary-value ${cls}">${sign}${absVal} ${m.unit} <span class="target">(${sign}${pct}%)</span></span>
+        <div class="consolidated-row">
+          <span class="macro-name">${m.label}</span>
+          <div class="macro-values">
+            <span class="macro-actual">${actual}</span>
+            <span class="macro-target">/ ${target}${m.unit}</span>
+            <span class="macro-slash">/</span>
+            <span class="macro-dev ${cls}">${devFormatted}</span>
+          </div>
         </div>
       `;
     }).join('');
@@ -304,50 +383,10 @@ export const UI = {
     if (dailySummaryEl) {
       dailySummaryEl.innerHTML = `
         <div class="summary-card">
-          <div class="summary-title">Daily Total</div>
-          ${totalRows}
-        </div>
-        <div class="summary-card">
-          <div class="summary-title">Deviation</div>
-          ${devRows}
-        </div>
-      `;
-    }
-
-    // Meal allocation table
-    const allocRows = r.mealResults.map(meal => {
-      const tgt = Math.round(meal.targetCalories);
-      const act = Math.round(meal.calories);
-      const dev = Math.round(meal.calDeviation);
-      const sign = dev >= 0 ? '+' : '';
-      const cls = Math.abs(dev) < 1 ? 'deviation-zero'
-        : dev > 0 ? 'deviation-pos' : 'deviation-neg';
-      return `
-        <tr>
-          <td class="meal-name-col">${esc(meal.name)}</td>
-          <td class="num-col">${tgt}</td>
-          <td class="num-col">${act}</td>
-          <td class="num-col ${cls}">${sign}${dev}</td>
-        </tr>
-      `;
-    }).join('');
-
-    const mealAllocEl = document.getElementById('meal-allocation');
-    if (mealAllocEl) {
-      mealAllocEl.innerHTML = `
-        <div class="summary-card">
-          <div class="summary-title">Meal Allocation</div>
-          <table class="alloc-table">
-            <thead>
-              <tr>
-                <th>Meal</th>
-                <th class="num-col">Target</th>
-                <th class="num-col">Actual</th>
-                <th class="num-col">Dev</th>
-              </tr>
-            </thead>
-            <tbody>${allocRows}</tbody>
-          </table>
+          <div class="summary-title">Daily Summary</div>
+          <div class="consolidated-summary-list">
+            ${summaryRows}
+          </div>
         </div>
       `;
     }

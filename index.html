@@ -51,8 +51,12 @@
       <div class="section-header">Meals</div>
       <div class="card">
         <div class="meal-count-row">
-          <label for="meal-count">Count</label>
-          <input type="number" id="meal-count" value="3" min="1" max="20" step="1" inputmode="numeric" />
+          <label for="meal-count-display">Count</label>
+          <div class="stepper-wrap">
+            <button type="button" class="stepper-btn" id="meal-count-dec" aria-label="Decrease meal count">−</button>
+            <span class="stepper-value" id="meal-count-display">3</span>
+            <button type="button" class="stepper-btn" id="meal-count-inc" aria-label="Increase meal count">+</button>
+          </div>
         </div>
         <div id="meal-rows"></div>
         <div class="meal-total-row">
@@ -72,28 +76,10 @@
         </div>
       </div>
       <div class="card">
-        <div class="ingredient-table-wrap">
-          <table class="ingredient-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th class="num-col">Serv</th>
-                <th>Unit</th>
-                <th class="num-col">Cal</th>
-                <th class="num-col">Pro</th>
-                <th class="num-col">Carb</th>
-                <th class="num-col">Fat</th>
-                <th class="num-col" title="Min Servings per meal">Min</th>
-                <th class="num-col" title="Max Servings per meal">Max</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="ingredient-tbody"></tbody>
-          </table>
-        </div>
+        <div id="ingredient-list" class="ingredient-list"></div>
         <div class="ingredient-actions">
           <button class="btn" id="add-ingredient-btn" style="flex:1;">+ Add</button>
-          <button class="btn btn-danger" id="clear-data-btn">Reset</button>
+          <button class="btn" id="clear-data-btn">Reset</button>
         </div>
       </div>
       <input type="file" id="import-file-input" accept=".json,application/json" />
@@ -129,12 +115,11 @@
       <div class="section-header">Results</div>
       <div id="meal-result-cards"></div>
       <div id="daily-summary"></div>
-      <div id="meal-allocation"></div>
       <div class="approx-notice hidden" id="approx-notice"></div>
     </section>
   </main>
 
-  <div class="log-hint">Client-Side LP Solver · Offline Ready</div>
+  <div class="log-hint">MILP · 2-PHASE SIMPLEX · BRANCH & CUT · MIR CUTS · DYNAMIC TABLEAU</div>
 
   <script src="./src/vendor/solver.js"></script>
   <script type="module" src="./src/main.js"></script>
