@@ -26,7 +26,8 @@ export const state = {
   weights: { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 },
   penalties: {
     simplicity: 0.0005,
-    quantity: 0.00001
+    quantity: 0.00001,
+    boundaryExcess: 0.002
   },
   result: null
 };

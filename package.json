@@ -1,0 +1,20 @@
+{
+  "name": "meal-plan",
+  "version": "1.0.0",
+  "description": "Nutritional Macro Solver & Meal Plan Optimizer",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/eval_suite.js",
+    "lint": "npx eslint ."
+  },
+  "keywords": [
+    "nutrition",
+    "macro",
+    "solver",
+    "meal-planning",
+    "optimization",
+    "linear-programming"
+  ],
+  "author": "",
+  "license": "ISC"
+}

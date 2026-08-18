@@ -32,13 +32,25 @@ export const Optimization = {
     const minIngPerMeal = mealConstraints && typeof mealConstraints.minIngredients === 'number' ? mealConstraints.minIngredients : 0;
     const maxIngPerMeal = mealConstraints && typeof mealConstraints.maxIngredients === 'number' ? mealConstraints.maxIngredients : 0;
 
+    // Determine if discrete integer/binary selection constraints are actively required
+    const needsBinaries = (minIngPerMeal > 1) ||
+                          (maxIngPerMeal > 0 && maxIngPerMeal < ingredients.length) ||
+                          ingredients.some(ing => typeof ing.minServings === 'number' && ing.minServings > 0);
+
     const model = {
       optimize: 'cost',
       opType: 'min',
       constraints: {},
       variables: {},
-      binaries: {}
+      options: {
+        timeout: 300,
+        tolerance: 0.05
+      }
     };
+
+    if (needsBinaries) {
+      model.binaries = {};
+    }
 
     // 1. Daily macro constraints (with deviation variables dP and dM)
     // sum_j sum_i (x_ij * Macro_i) + dM_m - dP_m = target_m
@@ -62,33 +74,30 @@ export const Optimization = {
       model.variables[`mdM_${j}`] = { cost: coeff, [c]: 1 };
     });
 
-    // 3. Per-meal ingredient count constraints
-    // minIngredients <= sum_i z_ij <= maxIngredients
-    meals.forEach((_, j) => {
-      if (minIngPerMeal > 0) {
-        model.constraints[`meal_ing_min_${j}`] = { min: minIngPerMeal };
-      }
-      if (maxIngPerMeal > 0) {
-        model.constraints[`meal_ing_max_${j}`] = { max: maxIngPerMeal };
-      }
-    });
+    // 3. Per-meal ingredient count constraints (if binaries needed)
+    if (needsBinaries) {
+      meals.forEach((_, j) => {
+        if (minIngPerMeal > 0) {
+          model.constraints[`meal_ing_min_${j}`] = { min: minIngPerMeal };
+        }
+        if (maxIngPerMeal > 0) {
+          model.constraints[`meal_ing_max_${j}`] = { max: maxIngPerMeal };
+        }
+      });
+    }
 
-    // 4. Decision variables: x_i_j (servings) and z_i_j (binary selection)
+    const boundaryExcessPenalty = (penalties && typeof penalties.boundaryExcess === 'number') ? penalties.boundaryExcess : 0.002;
+
+    // 4. Decision variables: x_i_j (servings), optional z_i_j (binary selection), and soft boundary excess
     ingredients.forEach((ing, i) => {
       const maxS = typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 10;
       const minS = typeof ing.minServings === 'number' && ing.minServings > 0 ? ing.minServings : 0;
+      const prefS = typeof ing.preferredServings === 'number' && ing.preferredServings > 0 ? ing.preferredServings : 1.0;
 
       meals.forEach((_, j) => {
         const v_x = `x_${i}_${j}`;
         const v_z = `z_${i}_${j}`;
-
-        // Declare z_i_j as binary
-        model.binaries[v_z] = 1;
-
-        // Binary selection variable entry with weak simplicity penalty
-        const zEntry = {
-          cost: simplicityPenalty
-        };
+        const v_excess = `excess_${i}_${j}`;
 
         // Continuous servings variable entry with minute quantity penalty
         const xEntry = {
@@ -103,30 +112,56 @@ export const Optimization = {
         // Contribute to meal calories
         xEntry[`meal_${j}`] = ing.calories;
 
-        // Link upper bound: x_ij <= maxServings_i * z_ij  =>  x_ij - maxServings_i * z_ij <= 0
-        const linkMax = `link_max_${i}_${j}`;
-        model.constraints[linkMax] = { max: 0 };
-        xEntry[linkMax] = 1;
-        zEntry[linkMax] = -maxS;
-
-        // Link lower bound: x_ij >= minServings_i * z_ij  =>  x_ij - minServings_i * z_ij >= 0 (if minServings > 0)
-        if (minS > 0) {
-          const linkMin = `link_min_${i}_${j}`;
-          model.constraints[linkMin] = { min: 0 };
-          xEntry[linkMin] = 1;
-          zEntry[linkMin] = -minS;
+        // Soft boundary preference: penalize servings above preferred baseline
+        if (maxS > prefS) {
+          const softBnd = `soft_pref_${i}_${j}`;
+          model.constraints[softBnd] = { max: prefS };
+          xEntry[softBnd] = 1;
+          model.variables[v_excess] = {
+            cost: boundaryExcessPenalty,
+            [softBnd]: -1
+          };
         }
 
-        // Link to meal ingredient limits
-        if (minIngPerMeal > 0) {
-          zEntry[`meal_ing_min_${j}`] = 1;
-        }
-        if (maxIngPerMeal > 0) {
-          zEntry[`meal_ing_max_${j}`] = 1;
+        if (needsBinaries) {
+          model.binaries[v_z] = 1;
+
+          const zEntry = {
+            cost: simplicityPenalty
+          };
+
+          // Link upper bound: x_ij - maxServings_i * z_ij <= 0
+          const linkMax = `link_max_${i}_${j}`;
+          model.constraints[linkMax] = { max: 0 };
+          xEntry[linkMax] = 1;
+          zEntry[linkMax] = -maxS;
+
+          // Link lower bound: x_ij - minServings_i * z_ij >= 0 (if minServings > 0)
+          if (minS > 0) {
+            const linkMin = `link_min_${i}_${j}`;
+            model.constraints[linkMin] = { min: 0 };
+            xEntry[linkMin] = 1;
+            zEntry[linkMin] = -minS;
+          }
+
+          if (minIngPerMeal > 0) zEntry[`meal_ing_min_${j}`] = 1;
+          if (maxIngPerMeal > 0) zEntry[`meal_ing_max_${j}`] = 1;
+
+          model.variables[v_z] = zEntry;
+        } else {
+          // Direct bounds for continuous LP
+          const bndMax = `bound_max_${i}_${j}`;
+          model.constraints[bndMax] = { max: maxS };
+          xEntry[bndMax] = 1;
+
+          if (minS > 0) {
+            const bndMin = `bound_min_${i}_${j}`;
+            model.constraints[bndMin] = { min: minS };
+            xEntry[bndMin] = 1;
+          }
         }
 
         model.variables[v_x] = xEntry;
-        model.variables[v_z] = zEntry;
       });
     });
 

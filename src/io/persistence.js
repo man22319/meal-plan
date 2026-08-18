@@ -12,7 +12,7 @@ export const Persistence = {
         mealConstraints: state.mealConstraints,
         weights: state.weights
       }));
-    } catch (_) {
+    } catch {
       // quota exceeded or private mode
     }
   },
@@ -70,7 +70,7 @@ export const Persistence = {
       }
 
       return true;
-    } catch (_) {
+    } catch {
       return false;
     }
   },
@@ -79,7 +79,7 @@ export const Persistence = {
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(SETTINGS_KEY);
-    } catch (_) {}
+    } catch {}
     state.ingredients = JSON.parse(JSON.stringify(DEFAULT_INGREDIENTS));
     state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
     state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
@@ -137,7 +137,7 @@ export const ImportExport = {
         Persistence.save();
         state.result = null;
         if (onSuccess) onSuccess();
-      } catch (_) {
+      } catch {
         if (onError) onError(['Import failed: file is not valid JSON.']);
       }
     };
