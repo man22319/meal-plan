@@ -44,6 +44,7 @@ function setupEventListeners() {
         fileInput.files[0],
         () => {
           UI.renderIngredients();
+          UI.renderWeights();
           UI.hideResults();
           UI.clearErrors();
         },

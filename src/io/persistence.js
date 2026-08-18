@@ -90,8 +90,29 @@ export const Persistence = {
 export const ImportExport = {
   exportJSON() {
     const data = {
-      ingredients: state.ingredients,
-      mealConstraints: state.mealConstraints
+      ingredients: state.ingredients.map(ing => ({
+        name: ing.name,
+        servingSize: ing.servingSize,
+        unit: ing.unit,
+        calories: ing.calories,
+        protein: ing.protein,
+        carbs: ing.carbs,
+        fat: ing.fat,
+        minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
+        maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5,
+        quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous'
+      })),
+      mealConstraints: {
+        minIngredients: state.mealConstraints?.minIngredients ?? 1,
+        maxIngredients: state.mealConstraints?.maxIngredients ?? 4
+      },
+      weights: {
+        calories: state.weights?.calories ?? 1.0,
+        protein: state.weights?.protein ?? 1.0,
+        carbs: state.weights?.carbs ?? 0.5,
+        fat: state.weights?.fat ?? 0.5,
+        mealAllocation: state.weights?.mealAllocation ?? 0.2
+      }
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -128,12 +149,22 @@ export const ImportExport = {
         }));
 
         if (parsed.mealConstraints && typeof parsed.mealConstraints === 'object') {
+          if (!state.mealConstraints) state.mealConstraints = {};
           if (typeof parsed.mealConstraints.minIngredients === 'number') {
             state.mealConstraints.minIngredients = parsed.mealConstraints.minIngredients;
           }
           if (typeof parsed.mealConstraints.maxIngredients === 'number') {
             state.mealConstraints.maxIngredients = parsed.mealConstraints.maxIngredients;
           }
+        }
+
+        if (parsed.weights && typeof parsed.weights === 'object') {
+          if (!state.weights) state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+          ['calories', 'protein', 'carbs', 'fat', 'mealAllocation'].forEach(k => {
+            if (typeof parsed.weights[k] === 'number') {
+              state.weights[k] = parsed.weights[k];
+            }
+          });
         }
 
         Persistence.save();
@@ -211,6 +242,43 @@ export const ImportExport = {
         errors.push(`"${label}": quantityMode must be "continuous" or "discrete".`);
       }
     });
+
+    if (typeof data.mealConstraints !== 'undefined') {
+      if (!data.mealConstraints || typeof data.mealConstraints !== 'object' || Array.isArray(data.mealConstraints)) {
+        errors.push('mealConstraints must be an object.');
+      } else {
+        const mc = data.mealConstraints;
+        if (typeof mc.minIngredients !== 'undefined') {
+          if (typeof mc.minIngredients !== 'number' || isNaN(mc.minIngredients) || mc.minIngredients < 0) {
+            errors.push('mealConstraints.minIngredients must be a non-negative number.');
+          }
+        }
+        if (typeof mc.maxIngredients !== 'undefined') {
+          if (typeof mc.maxIngredients !== 'number' || isNaN(mc.maxIngredients) || mc.maxIngredients < 1) {
+            errors.push('mealConstraints.maxIngredients must be a positive number.');
+          }
+        }
+        if (typeof mc.minIngredients === 'number' && typeof mc.maxIngredients === 'number' && mc.minIngredients > mc.maxIngredients) {
+          errors.push('mealConstraints.minIngredients cannot exceed mealConstraints.maxIngredients.');
+        }
+      }
+    }
+
+    if (typeof data.weights !== 'undefined') {
+      if (!data.weights || typeof data.weights !== 'object' || Array.isArray(data.weights)) {
+        errors.push('weights must be an object.');
+      } else {
+        const w = data.weights;
+        ['calories', 'protein', 'carbs', 'fat', 'mealAllocation'].forEach(k => {
+          if (typeof w[k] !== 'undefined') {
+            if (typeof w[k] !== 'number' || isNaN(w[k]) || w[k] < 0) {
+              errors.push(`weights.${k} must be a non-negative number.`);
+            }
+          }
+        });
+      }
+    }
+
     return errors;
   }
 };

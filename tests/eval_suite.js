@@ -625,6 +625,52 @@ export function runQuantityModeTestSuite() {
     results.push({ name: 'QM-5: Validation & Backward Compatibility', passed });
   }
 
+  // QM-6: Export/Import of Weights, Limits & Ingredient Quantity Modes
+  {
+    const fullPayload = {
+      ingredients: [
+        { name: 'Eggs', servingSize: 50, unit: 'g', calories: 72, protein: 6.3, carbs: 0.4, fat: 4.8, minServings: 1, maxServings: 4, quantityMode: 'discrete' },
+        { name: 'Oats', servingSize: 40, unit: 'g', calories: 150, protein: 5, carbs: 27, fat: 3, minServings: 0.5, maxServings: 3, quantityMode: 'continuous' }
+      ],
+      mealConstraints: {
+        minIngredients: 2,
+        maxIngredients: 5
+      },
+      weights: {
+        calories: 1.5,
+        protein: 2.0,
+        carbs: 0.8,
+        fat: 0.4,
+        mealAllocation: 0.3
+      }
+    };
+
+    const validErrors = ImportExport._validate(fullPayload);
+
+    const invalidWeightsPayload = {
+      ...fullPayload,
+      weights: { calories: -1, protein: 'high' }
+    };
+    const invalidWeightsErrors = ImportExport._validate(invalidWeightsPayload);
+
+    const invalidConstraintsPayload = {
+      ...fullPayload,
+      mealConstraints: { minIngredients: 6, maxIngredients: 2 }
+    };
+    const invalidConstraintsErrors = ImportExport._validate(invalidConstraintsPayload);
+
+    const passed = validErrors.length === 0 &&
+      invalidWeightsErrors.length > 0 &&
+      invalidConstraintsErrors.length > 0;
+
+    console.log(`[QM-6] Weights & Limits Import/Export Validation:`);
+    console.log(`       Full payload check: errors=${validErrors.length}`);
+    console.log(`       Invalid weights errors=${invalidWeightsErrors.length} (${invalidWeightsErrors[0] || ''})`);
+    console.log(`       Invalid constraints errors=${invalidConstraintsErrors.length} (${invalidConstraintsErrors[0] || ''})`);
+    console.log(`       Status: ${passed ? 'PASSED (Weights, limits and quantityMode properly validated)' : 'FAILED'}\n`);
+    results.push({ name: 'QM-6: Weights & Limits Validation', passed });
+  }
+
   const allPassed = results.every(r => r.passed);
   if (!allPassed) {
     console.error('ERROR: Some quantity mode tests failed!');
