@@ -9,7 +9,8 @@ export const Validation = {
     return [
       ...Validation.validateTargets(),
       ...Validation.validateMeals(),
-      ...Validation.validateIngredients()
+      ...Validation.validateIngredients(),
+      ...Validation.validateMealConstraints()
     ];
   },
 
@@ -77,7 +78,40 @@ export const Validation = {
           errors.push(`"${label}": ${k} cannot be negative.`);
         }
       });
+      if (typeof ing.minServings !== 'undefined' && (typeof ing.minServings !== 'number' || isNaN(ing.minServings) || ing.minServings < 0)) {
+        errors.push(`"${label}": min servings cannot be negative.`);
+      }
+      if (typeof ing.maxServings !== 'undefined' && (typeof ing.maxServings !== 'number' || isNaN(ing.maxServings) || ing.maxServings <= 0)) {
+        errors.push(`"${label}": max servings must be positive.`);
+      }
+      if (typeof ing.minServings === 'number' && typeof ing.maxServings === 'number' && ing.minServings > ing.maxServings) {
+        errors.push(`"${label}": min servings (${ing.minServings}) cannot exceed max servings (${ing.maxServings}).`);
+      }
     });
+    return errors;
+  },
+
+  validateMealConstraints() {
+    const errors = [];
+    const mc = state.mealConstraints;
+    if (!mc) return errors;
+    if (typeof mc.minIngredients === 'number') {
+      if (mc.minIngredients < 0) {
+        errors.push('Min ingredients per meal cannot be negative.');
+      } else if (mc.minIngredients > state.ingredients.length) {
+        errors.push(`Min ingredients per meal (${mc.minIngredients}) cannot exceed total available ingredients (${state.ingredients.length}).`);
+      }
+    }
+    if (typeof mc.maxIngredients === 'number') {
+      if (mc.maxIngredients < 1) {
+        errors.push('Max ingredients per meal must be at least 1.');
+      }
+    }
+    if (typeof mc.minIngredients === 'number' && typeof mc.maxIngredients === 'number') {
+      if (mc.minIngredients > mc.maxIngredients) {
+        errors.push(`Min ingredients per meal (${mc.minIngredients}) cannot exceed max ingredients per meal (${mc.maxIngredients}).`);
+      }
+    }
     return errors;
   }
 };

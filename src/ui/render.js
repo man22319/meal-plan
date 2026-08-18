@@ -121,6 +121,10 @@ export const UI = {
                    data-i="${i}" data-f="carbs" inputmode="decimal" /></td>
         <td><input type="number" value="${ing.fat}" min="0" step="0.1"
                    data-i="${i}" data-f="fat" inputmode="decimal" /></td>
+        <td><input type="number" value="${typeof ing.minServings === 'number' ? ing.minServings : 0}" min="0" step="0.5"
+                   data-i="${i}" data-f="minServings" placeholder="0" inputmode="decimal" /></td>
+        <td><input type="number" value="${typeof ing.maxServings === 'number' ? ing.maxServings : 5}" min="0.1" step="0.5"
+                   data-i="${i}" data-f="maxServings" placeholder="5" inputmode="decimal" /></td>
         <td class="del-cell">
           <button class="del-btn" data-del="${i}" title="Delete">&times;</button>
         </td>
@@ -153,7 +157,8 @@ export const UI = {
   addIngredient() {
     state.ingredients.push({
       name: '', servingSize: 100, unit: 'g',
-      calories: 0, protein: 0, carbs: 0, fat: 0
+      calories: 0, protein: 0, carbs: 0, fat: 0,
+      minServings: 0, maxServings: 5
     });
     Persistence.save();
     UI.renderIngredients();
@@ -165,33 +170,44 @@ export const UI = {
     }
   },
 
-  // ── WEIGHTS ──
+  // ── WEIGHTS & LIMITS ──
   renderWeights() {
     const fields = [
-      { key: 'calories', label: 'Calories' },
-      { key: 'protein', label: 'Protein' },
-      { key: 'carbs', label: 'Carbs' },
-      { key: 'fat', label: 'Fat' },
-      { key: 'mealAllocation', label: 'Meal Alloc.' }
+      { key: 'calories', label: 'Calories Weight', group: 'weights', step: '0.1', min: 0, val: state.weights.calories },
+      { key: 'protein', label: 'Protein Weight', group: 'weights', step: '0.1', min: 0, val: state.weights.protein },
+      { key: 'carbs', label: 'Carbs Weight', group: 'weights', step: '0.1', min: 0, val: state.weights.carbs },
+      { key: 'fat', label: 'Fat Weight', group: 'weights', step: '0.1', min: 0, val: state.weights.fat },
+      { key: 'mealAllocation', label: 'Meal Alloc. Weight', group: 'weights', step: '0.1', min: 0, val: state.weights.mealAllocation },
+      { key: 'minIngredients', label: 'Min Items / Meal', group: 'mealConstraints', step: '1', min: 0, val: state.mealConstraints?.minIngredients ?? 1 },
+      { key: 'maxIngredients', label: 'Max Items / Meal', group: 'mealConstraints', step: '1', min: 1, val: state.mealConstraints?.maxIngredients ?? 4 }
     ];
     const container = document.getElementById('weight-fields');
     if (!container) return;
 
     container.innerHTML = fields.map(f => `
       <div class="weight-field">
-        <label for="weight-${f.key}">${f.label}</label>
-        <input type="number" id="weight-${f.key}"
-               value="${state.weights[f.key]}"
-               min="0" step="0.1" inputmode="decimal" />
+        <label for="setting-${f.key}">${f.label}</label>
+        <input type="number" id="setting-${f.key}"
+               value="${f.val}"
+               data-group="${f.group}"
+               data-key="${f.key}"
+               min="${f.min}" step="${f.step}" inputmode="decimal" />
       </div>
     `).join('');
 
     fields.forEach(f => {
-      const input = document.getElementById(`weight-${f.key}`);
+      const input = document.getElementById(`setting-${f.key}`);
       if (input) {
         input.addEventListener('input', function () {
           const val = parseFloat(this.value);
-          state.weights[f.key] = isNaN(val) ? 0 : val;
+          const num = isNaN(val) ? 0 : val;
+          if (this.dataset.group === 'weights') {
+            state.weights[this.dataset.key] = num;
+          } else if (this.dataset.group === 'mealConstraints') {
+            if (!state.mealConstraints) state.mealConstraints = {};
+            state.mealConstraints[this.dataset.key] = num;
+          }
+          Persistence.save();
         });
       }
     });
@@ -213,7 +229,7 @@ export const UI = {
           ? meal.items.map(item => `
               <div class="result-ingredient-row">
                 <span class="result-ingredient-name">${esc(item.name)}</span>
-                <span class="result-ingredient-qty">${Math.round(item.quantity)} ${esc(item.unit)}</span>
+                <span class="result-ingredient-qty">${Math.round(item.quantity)} ${esc(item.unit)} <span class="result-servings">(${item.servings.toFixed(2)} serv)</span></span>
               </div>
             `).join('')
           : '<div class="result-no-items">No ingredients assigned</div>';
@@ -222,7 +238,7 @@ export const UI = {
           <div class="result-card">
             <div class="result-card-header">
               <span class="result-meal-name">${esc(meal.name)}</span>
-              <span class="result-meal-pct">${meal.pct}%</span>
+              <span class="result-meal-pct">${meal.pct}% (${Math.round(meal.targetCalories)} kcal target)</span>
             </div>
             ${itemsHTML}
             <div class="result-meal-macros">
@@ -340,7 +356,7 @@ export const UI = {
     const notice = document.getElementById('approx-notice');
     if (notice) {
       if (r.approximate) {
-        notice.textContent = 'Approximate solution. No exact feasible solution was found.';
+        notice.textContent = 'Approximate nutritional solution: Result deviates from target macros due to ingredient bounds or limits.';
         notice.classList.remove('hidden');
       } else {
         notice.classList.add('hidden');

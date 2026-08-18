@@ -64,6 +64,7 @@ function setupEventListeners() {
     Persistence.resetToDefaults();
     state.result = null;
     UI.renderIngredients();
+    UI.renderWeights();
     UI.hideResults();
     UI.clearErrors();
   });

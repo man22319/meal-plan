@@ -173,7 +173,7 @@ label {
 .ingredient-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 560px;
+  min-width: 660px;
 }
 
 .ingredient-table th {

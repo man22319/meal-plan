@@ -75,6 +75,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.result-servings {
+  color: var(--dim);
+  font-size: 0.7rem;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
 .result-meal-macros {
   margin-top: 8px;
   padding-top: 8px;

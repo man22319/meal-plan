@@ -2,12 +2,16 @@
 // PERSISTENCE & IMPORT / EXPORT
 // ══════════════════════════════════════════
 
-import { state, STORAGE_KEY, DEFAULT_INGREDIENTS } from '../core/state.js';
+import { state, STORAGE_KEY, SETTINGS_KEY, DEFAULT_INGREDIENTS } from '../core/state.js';
 
 export const Persistence = {
   save() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.ingredients));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        mealConstraints: state.mealConstraints,
+        weights: state.weights
+      }));
     } catch (_) {
       // quota exceeded or private mode
     }
@@ -16,20 +20,55 @@ export const Persistence = {
   load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return false;
-      const validated = parsed.filter(ing =>
-        ing && typeof ing.name === 'string' && ing.name.trim() !== '' &&
-        typeof ing.servingSize === 'number' && ing.servingSize > 0 &&
-        typeof ing.unit === 'string' && ing.unit.trim() !== '' &&
-        typeof ing.calories === 'number' && ing.calories >= 0 &&
-        typeof ing.protein === 'number' && ing.protein >= 0 &&
-        typeof ing.carbs === 'number' && ing.carbs >= 0 &&
-        typeof ing.fat === 'number' && ing.fat >= 0
-      );
-      if (validated.length === 0) return false;
-      state.ingredients = validated;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const validated = parsed.map(ing => {
+            if (!ing || typeof ing.name !== 'string' || ing.name.trim() === '') return null;
+            if (typeof ing.servingSize !== 'number' || ing.servingSize <= 0) return null;
+            if (typeof ing.unit !== 'string' || ing.unit.trim() === '') return null;
+            if (typeof ing.calories !== 'number' || ing.calories < 0) return null;
+            if (typeof ing.protein !== 'number' || ing.protein < 0) return null;
+            if (typeof ing.carbs !== 'number' || ing.carbs < 0) return null;
+            if (typeof ing.fat !== 'number' || ing.fat < 0) return null;
+
+            return {
+              name: ing.name.trim(),
+              servingSize: ing.servingSize,
+              unit: ing.unit.trim(),
+              calories: ing.calories,
+              protein: ing.protein,
+              carbs: ing.carbs,
+              fat: ing.fat,
+              minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
+              maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5
+            };
+          }).filter(Boolean);
+
+          if (validated.length > 0) {
+            state.ingredients = validated;
+          }
+        }
+      }
+
+      const rawSettings = localStorage.getItem(SETTINGS_KEY);
+      if (rawSettings) {
+        const parsedSettings = JSON.parse(rawSettings);
+        if (parsedSettings && typeof parsedSettings === 'object') {
+          if (parsedSettings.mealConstraints && typeof parsedSettings.mealConstraints === 'object') {
+            if (typeof parsedSettings.mealConstraints.minIngredients === 'number') {
+              state.mealConstraints.minIngredients = parsedSettings.mealConstraints.minIngredients;
+            }
+            if (typeof parsedSettings.mealConstraints.maxIngredients === 'number') {
+              state.mealConstraints.maxIngredients = parsedSettings.mealConstraints.maxIngredients;
+            }
+          }
+          if (parsedSettings.weights && typeof parsedSettings.weights === 'object') {
+            Object.assign(state.weights, parsedSettings.weights);
+          }
+        }
+      }
+
       return true;
     } catch (_) {
       return false;
@@ -39,14 +78,20 @@ export const Persistence = {
   resetToDefaults() {
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SETTINGS_KEY);
     } catch (_) {}
     state.ingredients = JSON.parse(JSON.stringify(DEFAULT_INGREDIENTS));
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
   }
 };
 
 export const ImportExport = {
   exportJSON() {
-    const data = { ingredients: state.ingredients };
+    const data = {
+      ingredients: state.ingredients,
+      mealConstraints: state.mealConstraints
+    };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -68,7 +113,27 @@ export const ImportExport = {
           if (onError) onError(errors);
           return;
         }
-        state.ingredients = parsed.ingredients;
+        state.ingredients = parsed.ingredients.map(ing => ({
+          name: ing.name.trim(),
+          servingSize: ing.servingSize,
+          unit: ing.unit.trim(),
+          calories: ing.calories,
+          protein: ing.protein,
+          carbs: ing.carbs,
+          fat: ing.fat,
+          minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
+          maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5
+        }));
+
+        if (parsed.mealConstraints && typeof parsed.mealConstraints === 'object') {
+          if (typeof parsed.mealConstraints.minIngredients === 'number') {
+            state.mealConstraints.minIngredients = parsed.mealConstraints.minIngredients;
+          }
+          if (typeof parsed.mealConstraints.maxIngredients === 'number') {
+            state.mealConstraints.maxIngredients = parsed.mealConstraints.maxIngredients;
+          }
+        }
+
         Persistence.save();
         state.result = null;
         if (onSuccess) onSuccess();
@@ -127,6 +192,19 @@ export const ImportExport = {
           errors.push(`"${label}": "${k}" cannot be negative.`);
         }
       });
+      if (typeof ing.minServings !== 'undefined') {
+        if (typeof ing.minServings !== 'number' || ing.minServings < 0) {
+          errors.push(`"${label}": minServings must be a non-negative number.`);
+        }
+      }
+      if (typeof ing.maxServings !== 'undefined') {
+        if (typeof ing.maxServings !== 'number' || ing.maxServings <= 0) {
+          errors.push(`"${label}": maxServings must be a positive number.`);
+        }
+      }
+      if (typeof ing.minServings === 'number' && typeof ing.maxServings === 'number' && ing.minServings > ing.maxServings) {
+        errors.push(`"${label}": minServings cannot exceed maxServings.`);
+      }
     });
     return errors;
   }

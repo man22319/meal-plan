@@ -6,13 +6,18 @@
   <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Macro Solver" />
+  <meta name="application-name" content="Macro Solver" />
   <meta name="theme-color" content="#0c0c0e" />
   <title>Macro Solver</title>
   <meta name="description"
     content="Client-side nutritional macro optimization calculator. Define targets, ingredients, and meal structure. The solver determines quantities." />
+  <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/x-icon" href="assets/img/favicon.ico" />
-  <link rel="icon" type="image/jpeg" href="assets/img/icon.jpg" />
-  <link rel="apple-touch-icon" href="assets/img/icon.jpg" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/img/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="assets/img/icon-512.png" />
+  <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/img/apple-touch-icon-180x180.png" />
   <link
     href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=IBM+Plex+Mono:wght@400;500&family=Barlow:wght@300;400;500&display=swap"
     rel="stylesheet" />
@@ -23,8 +28,8 @@
   <header>
     <div class="wordmark">
       <div class="brand-wrap">
-        <img class="header-logo-img" src="assets/img/icon.jpg"
-             onerror="this.onerror=null;if(!this.dataset.triedJpeg){this.dataset.triedJpeg=1;this.src='assets/img/icon.jpeg';}else{this.style.display='none';}"
+        <img class="header-logo-img" src="assets/img/apple-touch-icon-180x180.png"
+             onerror="this.onerror=null;this.src='assets/img/icon.jpeg';"
              alt="Macro Solver Logo" />
         <div class="logo">Macro <span>Solver</span></div>
       </div>
@@ -78,6 +83,8 @@
                 <th class="num-col">Pro</th>
                 <th class="num-col">Carb</th>
                 <th class="num-col">Fat</th>
+                <th class="num-col" title="Min Servings per meal">Min</th>
+                <th class="num-col" title="Max Servings per meal">Max</th>
                 <th></th>
               </tr>
             </thead>
@@ -96,7 +103,7 @@
     <section class="section" id="advanced-section">
       <button class="advanced-toggle" id="advanced-toggle">
         <span class="chevron">&#9654;</span>
-        Optimization Weights
+        Optimization Weights & Limits
       </button>
       <div class="advanced-body" id="advanced-body">
         <div class="card">
