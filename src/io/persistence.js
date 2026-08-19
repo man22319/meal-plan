@@ -2,7 +2,18 @@
 // PERSISTENCE & IMPORT / EXPORT
 // ══════════════════════════════════════════
 
-import { state, STORAGE_KEY, SETTINGS_KEY, DEFAULT_INGREDIENTS } from '../core/state.js';
+import {
+  state,
+  ensureId,
+  STORAGE_KEY,
+  SETTINGS_KEY,
+  TARGETS_KEY,
+  MEALS_KEY,
+  RESULT_KEY,
+  DEFAULT_INGREDIENTS,
+  DEFAULT_TARGETS,
+  DEFAULT_MEALS
+} from '../core/state.js';
 
 export const Persistence = {
   save() {
@@ -12,6 +23,16 @@ export const Persistence = {
         mealConstraints: state.mealConstraints,
         weights: state.weights
       }));
+      localStorage.setItem(TARGETS_KEY, JSON.stringify(state.targets));
+      localStorage.setItem(MEALS_KEY, JSON.stringify(state.meals));
+      if (state.result) {
+        localStorage.setItem(RESULT_KEY, JSON.stringify({
+          ...state.result,
+          actuals: state.actuals || {}
+        }));
+      } else {
+        localStorage.removeItem(RESULT_KEY);
+      }
     } catch {
       // quota exceeded or private mode
     }
@@ -23,11 +44,12 @@ export const Persistence = {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const validated = parsed.map(ing => {
+          const validated = parsed.map((ing, idx) => {
             if (!ing || typeof ing.name !== 'string' || ing.name.trim() === '') return null;
             if (typeof ing.unit !== 'string' || ing.unit.trim() === '') return null;
 
             return {
+              id: (typeof ing.id === 'string' && ing.id.trim() !== '') ? ing.id.trim() : ensureId(ing, `ing_${idx}`),
               name: ing.name.trim(),
               servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? '' : (typeof ing.servingSize === 'number' && ing.servingSize > 0 ? ing.servingSize : 100),
               unit: ing.unit.trim(),
@@ -66,6 +88,46 @@ export const Persistence = {
         }
       }
 
+      const rawTargets = localStorage.getItem(TARGETS_KEY);
+      if (rawTargets) {
+        const parsedTargets = JSON.parse(rawTargets);
+        if (parsedTargets && typeof parsedTargets === 'object') {
+          ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
+            if (typeof parsedTargets[k] === 'number' && !isNaN(parsedTargets[k]) && parsedTargets[k] >= 0) {
+              state.targets[k] = parsedTargets[k];
+            }
+          });
+        }
+      }
+
+      const rawMeals = localStorage.getItem(MEALS_KEY);
+      if (rawMeals) {
+        const parsedMeals = JSON.parse(rawMeals);
+        if (Array.isArray(parsedMeals) && parsedMeals.length >= 1 && parsedMeals.length <= 6) {
+          const validatedMeals = parsedMeals.map((m, i) => {
+            if (!m || typeof m !== 'object') return null;
+            const id = (typeof m.id === 'string' && m.id.trim() !== '') ? m.id.trim() : ensureId(m, `meal_${i}`);
+            const name = typeof m.name === 'string' ? m.name : `Meal ${i + 1}`;
+            const pct = typeof m.pct === 'number' && !isNaN(m.pct) && m.pct >= 0 ? m.pct : 0;
+            return { id, name, pct };
+          }).filter(Boolean);
+          if (validatedMeals.length === parsedMeals.length) {
+            state.meals = validatedMeals;
+          }
+        }
+      }
+
+      const rawResult = localStorage.getItem(RESULT_KEY);
+      if (rawResult) {
+        const parsedResult = JSON.parse(rawResult);
+        if (parsedResult && typeof parsedResult === 'object' && Array.isArray(parsedResult.mealResults) && parsedResult.totals && parsedResult.deviations) {
+          state.result = parsedResult;
+          if (parsedResult.actuals && typeof parsedResult.actuals === 'object') {
+            state.actuals = parsedResult.actuals;
+          }
+        }
+      }
+
       return true;
     } catch {
       return false;
@@ -76,10 +138,17 @@ export const Persistence = {
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(SETTINGS_KEY);
+      localStorage.removeItem(TARGETS_KEY);
+      localStorage.removeItem(MEALS_KEY);
+      localStorage.removeItem(RESULT_KEY);
     } catch {}
+    state.targets = JSON.parse(JSON.stringify(DEFAULT_TARGETS));
+    state.meals = JSON.parse(JSON.stringify(DEFAULT_MEALS));
     state.ingredients = JSON.parse(JSON.stringify(DEFAULT_INGREDIENTS));
     state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
     state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.actuals = {};
+    state.result = null;
   }
 };
 

@@ -38,85 +38,142 @@
   </header>
 
   <main>
-    <!-- ═══ DAILY TARGETS ═══ -->
-    <section class="section" id="targets-section">
-      <div class="section-header">Daily Targets</div>
-      <div class="card">
-        <div class="target-grid" id="target-fields"></div>
-      </div>
-    </section>
+    <!-- ═══ TAB NAVIGATION ═══ -->
+    <nav class="tab-nav" role="tablist" aria-label="Main Navigation">
+      <button type="button" class="tab-btn active" id="tab-btn-solver" role="tab" aria-selected="true" aria-controls="tab-solver">SOLVER</button>
+      <button type="button" class="tab-btn" id="tab-btn-ingredients" role="tab" aria-selected="false" aria-controls="tab-ingredients">INGREDIENTS</button>
+    </nav>
 
-    <!-- ═══ MEAL CONFIGURATION ═══ -->
-    <section class="section" id="meals-section">
-      <div class="section-header">Meals</div>
-      <div class="card">
-        <div class="meal-count-row">
-          <label for="meal-count-display">Count</label>
-          <div class="stepper-wrap">
-            <button type="button" class="stepper-btn" id="meal-count-dec" aria-label="Decrease meal count">−</button>
-            <span class="stepper-value" id="meal-count-display">3</span>
-            <button type="button" class="stepper-btn" id="meal-count-inc" aria-label="Increase meal count">+</button>
+    <!-- ══════════════════════════════════════════
+         SOLVER TAB
+    ══════════════════════════════════════════ -->
+    <div class="tab-panel active" id="tab-solver" role="tabpanel" aria-labelledby="tab-btn-solver">
+      <!-- Secondary Utility Bar: Import / Export -->
+      <div class="solver-utility-bar">
+        <span class="utility-label">DATA MANAGEMENT</span>
+        <div class="section-header-actions">
+          <button type="button" class="btn btn-sm" id="import-btn">Import</button>
+          <button type="button" class="btn btn-sm" id="export-btn">Export</button>
+        </div>
+      </div>
+
+      <!-- 1. DAILY TARGETS -->
+      <section class="section" id="targets-section">
+        <div class="section-header">Daily Targets</div>
+        <div class="card">
+          <div class="target-grid" id="target-fields"></div>
+        </div>
+      </section>
+
+      <!-- 2. MEALS -->
+      <section class="section" id="meals-section">
+        <div class="section-header">Meals</div>
+        <div class="card">
+          <div class="meal-count-row">
+            <label for="meal-count-display">Count</label>
+            <div class="stepper-wrap">
+              <button type="button" class="stepper-btn" id="meal-count-dec" aria-label="Decrease meal count">−</button>
+              <span class="stepper-value" id="meal-count-display">3</span>
+              <button type="button" class="stepper-btn" id="meal-count-inc" aria-label="Increase meal count">+</button>
+            </div>
+          </div>
+          <div id="meal-rows"></div>
+          <div class="meal-total-row">
+            <span class="meal-total-label">Total</span>
+            <span class="meal-total-value" id="meal-total-value">100.0%</span>
           </div>
         </div>
-        <div id="meal-rows"></div>
-        <div class="meal-total-row">
-          <span class="meal-total-label">Total</span>
-          <span class="meal-total-value" id="meal-total-value">100.0%</span>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ═══ INGREDIENTS ═══ -->
-    <section class="section" id="ingredients-section">
-      <div class="section-header">
-        <span>Ingredients</span>
-        <div class="section-header-actions">
-          <button class="btn btn-sm" id="import-btn">Import</button>
-          <button class="btn btn-sm" id="export-btn">Export</button>
-        </div>
-      </div>
-      <div class="card">
-        <div id="ingredient-list" class="ingredient-list"></div>
-        <div class="ingredient-actions">
-          <button class="btn" id="add-ingredient-btn" style="flex:1;">+ Add</button>
-          <button class="btn" id="clear-data-btn">Reset</button>
-        </div>
-      </div>
-      <input type="file" id="import-file-input" accept=".json,application/json" />
-    </section>
-
-    <!-- ═══ OPTIMIZATION SETTINGS ═══ -->
-    <section class="section" id="advanced-section">
-      <button class="advanced-toggle" id="advanced-toggle">
-        <span class="chevron">&#9654;</span>
-        Optimization Weights & Limits
-      </button>
-      <div class="advanced-body" id="advanced-body">
+      <!-- 3. OPTIMIZATION & WEIGHTS -->
+      <section class="section" id="weights-section">
+        <div class="section-header">Optimization Weights & Limits</div>
         <div class="card">
           <div class="weight-grid" id="weight-fields"></div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ═══ SOLVE ═══ -->
-    <div class="solve-row">
-      <button class="btn btn-primary" id="solve-btn">SOLVE</button>
+      <!-- 4. SOLVE -->
+      <div class="solve-row">
+        <button class="btn btn-primary" id="solve-btn">SOLVE</button>
+      </div>
+
+      <!-- ═══ ERRORS ═══ -->
+      <section class="section hidden" id="error-section">
+        <div class="error-card">
+          <ul class="error-list" id="error-list"></ul>
+        </div>
+      </section>
+
+      <!-- ═══ RESULTS ═══ -->
+      <section class="section" id="results-section">
+        <div class="section-header">
+          <span>Results</span>
+          <span class="results-reminder">Don't forget to screenshot if you like it!</span>
+        </div>
+        <div id="meal-result-cards"></div>
+        <div id="daily-summary"></div>
+        <div class="approx-notice hidden" id="approx-notice"></div>
+      </section>
     </div>
 
-    <!-- ═══ ERRORS ═══ -->
-    <section class="section hidden" id="error-section">
-      <div class="error-card">
-        <ul class="error-list" id="error-list"></ul>
-      </div>
-    </section>
+    <!-- ══════════════════════════════════════════
+         INGREDIENTS TAB
+    ══════════════════════════════════════════ -->
+    <div class="tab-panel hidden" id="tab-ingredients" role="tabpanel" aria-labelledby="tab-btn-ingredients">
+      <!-- ═══ INGREDIENTS DATABASE ═══ -->
+      <section class="section" id="ingredients-section">
+        <div class="section-header">
+          <span>Ingredients Database</span>
+        </div>
+        <div class="card">
+          <div id="ingredient-list" class="ingredient-list"></div>
+          <div class="ingredient-actions">
+            <button class="btn" id="add-ingredient-btn" style="flex:1;">+ Add</button>
+            <button class="btn" id="clear-data-btn">Reset</button>
+          </div>
+        </div>
+      </section>
+    </div>
 
-    <!-- ═══ RESULTS ═══ -->
-    <section class="section" id="results-section">
-      <div class="section-header">Results</div>
-      <div id="meal-result-cards"></div>
-      <div id="daily-summary"></div>
-      <div class="approx-notice hidden" id="approx-notice"></div>
-    </section>
+    <input type="file" id="import-file-input" accept=".json,application/json" />
+
+    <!-- ═══ ACTUAL PORTION MODAL ═══ -->
+    <div class="modal-backdrop hidden" id="actual-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-ingredient-title">
+      <div class="portion-modal">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <span class="modal-meal-tag" id="modal-meal-name">BREAKFAST</span>
+            <div class="modal-ingredient-name" id="modal-ingredient-title">CHICKEN</div>
+          </div>
+          <button type="button" class="modal-close-btn" id="modal-close-btn" aria-label="Close dialog">×</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="modal-section planned-section">
+            <span class="modal-section-label">PLANNED</span>
+            <div class="modal-planned-value" id="modal-planned-display">112 g</div>
+          </div>
+
+          <div class="modal-section actual-section">
+            <label class="modal-section-label" for="actual-qty-input">ACTUAL</label>
+            <div class="modal-input-wrap">
+              <input type="number" id="actual-qty-input" class="actual-qty-input" min="0" step="any" inputmode="decimal" placeholder="0" />
+              <span class="modal-unit-label" id="modal-unit-display">g</span>
+            </div>
+            <div class="modal-input-hint" id="modal-input-hint">Enter portion actually consumed or weighed</div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-sm btn-clear hidden" id="modal-clear-btn">CLEAR</button>
+          <div class="modal-actions-right">
+            <button type="button" class="btn btn-sm" id="modal-cancel-btn">CANCEL</button>
+            <button type="button" class="btn btn-sm btn-primary" id="modal-apply-btn">APPLY</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <div class="log-hint">MILP-2-PHASE SIMPLEX-BRANCH+CUT-MIR CUTS-DYNAMIC TABLEAU</div>

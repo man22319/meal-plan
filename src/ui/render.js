@@ -4,6 +4,7 @@
 
 import { state } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
+import { Optimization } from '../core/solver.js';
 
 const EPSILON = 0.001;
 
@@ -51,6 +52,7 @@ export const UI = {
           if (f.key === 'calories') {
             UI.updateMealKcals();
           }
+          Persistence.save();
         });
       }
     });
@@ -103,6 +105,7 @@ export const UI = {
           UI.updateMealKcals();
           UI.updateMealTotal();
         }
+        Persistence.save();
       });
     });
 
@@ -369,6 +372,123 @@ export const UI = {
     });
   },
 
+  // ── ACTUAL PORTION MODAL ──
+  currentModalContext: null,
+
+  initActualModal() {
+    const backdrop = document.getElementById('actual-modal-backdrop');
+    if (!backdrop || backdrop.dataset.initialized === 'true') return;
+    backdrop.dataset.initialized = 'true';
+
+    const closeBtn = document.getElementById('modal-close-btn');
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+    const applyBtn = document.getElementById('modal-apply-btn');
+    const clearBtn = document.getElementById('modal-clear-btn');
+    const input = document.getElementById('actual-qty-input');
+
+    const closeModal = () => {
+      backdrop.classList.add('hidden');
+      UI.currentModalContext = null;
+    };
+
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !backdrop.classList.contains('hidden')) {
+        closeModal();
+      }
+    });
+
+    const submitApply = () => {
+      if (!UI.currentModalContext) return;
+      const valStr = input.value.trim();
+      const val = parseFloat(valStr);
+      if (isNaN(val) || val < 0) {
+        input.focus();
+        return;
+      }
+
+      const { mealId, ingId, plannedQuantity } = UI.currentModalContext;
+      const outcome = Optimization.recordActual(mealId, ingId, val, plannedQuantity);
+      if (outcome.errors && outcome.errors.length > 0) {
+        UI.showErrors(outcome.errors);
+      } else {
+        UI.clearErrors();
+      }
+      Persistence.save();
+      UI.renderResults();
+      closeModal();
+    };
+
+    applyBtn?.addEventListener('click', submitApply);
+
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitApply();
+      }
+    });
+
+    clearBtn?.addEventListener('click', () => {
+      if (!UI.currentModalContext) return;
+      const { mealId, ingId } = UI.currentModalContext;
+      const outcome = Optimization.clearActual(mealId, ingId);
+      if (outcome.errors && outcome.errors.length > 0) {
+        UI.showErrors(outcome.errors);
+      } else {
+        UI.clearErrors();
+      }
+      Persistence.save();
+      UI.renderResults();
+      closeModal();
+    });
+  },
+
+  openActualModal(context) {
+    UI.initActualModal();
+    UI.currentModalContext = context;
+    const backdrop = document.getElementById('actual-modal-backdrop');
+    if (!backdrop) return;
+
+    const mealTag = document.getElementById('modal-meal-name');
+    if (mealTag) mealTag.textContent = context.mealName || 'MEAL';
+
+    const ingTitle = document.getElementById('modal-ingredient-title');
+    if (ingTitle) ingTitle.textContent = context.ingName || 'INGREDIENT';
+
+    const plannedDisp = document.getElementById('modal-planned-display');
+    if (plannedDisp) plannedDisp.textContent = `${Math.round(context.plannedQuantity)} ${context.unit}`;
+
+    const unitDisp = document.getElementById('modal-unit-display');
+    if (unitDisp) unitDisp.textContent = context.unit;
+
+    const input = document.getElementById('actual-qty-input');
+    if (input) {
+      const defaultVal = context.isActual ? context.actualQuantity : context.plannedQuantity;
+      input.value = typeof defaultVal === 'number' && !isNaN(defaultVal) ? Math.round(defaultVal * 10) / 10 : '';
+    }
+
+    const clearBtn = document.getElementById('modal-clear-btn');
+    if (clearBtn) {
+      if (context.isActual) {
+        clearBtn.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+      }
+    }
+
+    backdrop.classList.remove('hidden');
+    window.setTimeout(() => {
+      input?.focus();
+      input?.select();
+    }, 50);
+  },
+
   // ── RESULTS ──
   renderResults() {
     const r = state.result;
@@ -377,17 +497,68 @@ export const UI = {
     const section = document.getElementById('results-section');
     if (!section) return;
 
+    UI.initActualModal();
+
     // Meal cards
     const cardsEl = document.getElementById('meal-result-cards');
     if (cardsEl) {
-      cardsEl.innerHTML = r.mealResults.map(meal => {
+      cardsEl.innerHTML = r.mealResults.map((meal, mealIdx) => {
         const itemsHTML = meal.items.length > 0
-          ? meal.items.map(item => `
-              <div class="result-ingredient-row">
-                <span class="result-ingredient-name">${esc(item.name)}</span>
-                <span class="result-ingredient-qty">${Math.round(item.quantity)} ${esc(item.unit)} <span class="result-servings">(${item.servings.toFixed(2)} serv)</span></span>
-              </div>
-            `).join('')
+          ? meal.items.map(item => {
+              if (item.isActual) {
+                return `
+                  <div class="result-ingredient-row is-actual"
+                       role="button"
+                       tabindex="0"
+                       data-meal-id="${escAttr(item.mealId || meal.id || mealIdx)}"
+                       data-ing-id="${escAttr(item.id || item.name)}"
+                       data-meal-name="${escAttr(meal.name)}"
+                       data-ing-name="${escAttr(item.name)}"
+                       data-unit="${escAttr(item.unit)}"
+                       data-planned="${item.plannedQuantity}"
+                       data-actual="${item.actualQuantity}"
+                       data-is-actual="true"
+                       aria-label="Edit actual portion for ${escAttr(item.name)} in ${escAttr(meal.name)}">
+                    <div class="result-ingredient-left">
+                      <span class="result-ingredient-name">${esc(item.name)}</span>
+                      <span class="result-planned-sub">planned ${Math.round(item.plannedQuantity)} ${esc(item.unit)}</span>
+                    </div>
+                    <div class="result-ingredient-right">
+                      <div class="result-qty-line">
+                        <span class="result-ingredient-qty">${Math.round(item.actualQuantity)} ${esc(item.unit)}</span>
+                        <span class="actual-badge">ACTUAL</span>
+                      </div>
+                      <span class="result-servings">(${item.servings.toFixed(2)} serv)</span>
+                    </div>
+                  </div>
+                `;
+              }
+
+              return `
+                <div class="result-ingredient-row"
+                     role="button"
+                     tabindex="0"
+                     data-meal-id="${escAttr(item.mealId || meal.id || mealIdx)}"
+                     data-ing-id="${escAttr(item.id || item.name)}"
+                     data-meal-name="${escAttr(meal.name)}"
+                     data-ing-name="${escAttr(item.name)}"
+                     data-unit="${escAttr(item.unit)}"
+                     data-planned="${item.plannedQuantity}"
+                     data-actual=""
+                     data-is-actual="false"
+                     aria-label="Record actual portion for ${escAttr(item.name)} in ${escAttr(meal.name)}">
+                  <div class="result-ingredient-left">
+                    <span class="result-ingredient-name">${esc(item.name)}</span>
+                  </div>
+                  <div class="result-ingredient-right">
+                    <div class="result-qty-line">
+                      <span class="result-ingredient-qty">${Math.round(item.quantity)} ${esc(item.unit)}</span>
+                    </div>
+                    <span class="result-servings">(${item.servings.toFixed(2)} serv)</span>
+                  </div>
+                </div>
+              `;
+            }).join('')
           : '<div class="result-no-items">No ingredients assigned</div>';
 
         return `
@@ -422,6 +593,38 @@ export const UI = {
           </div>
         `;
       }).join('');
+
+      cardsEl.querySelectorAll('.result-ingredient-row').forEach(row => {
+        const handleOpen = () => {
+          const mealId = row.dataset.mealId;
+          const ingId = row.dataset.ingId;
+          const mealName = row.dataset.mealName;
+          const ingName = row.dataset.ingName;
+          const unit = row.dataset.unit;
+          const plannedQuantity = parseFloat(row.dataset.planned) || 0;
+          const actualQuantity = row.dataset.actual !== '' ? parseFloat(row.dataset.actual) : null;
+          const isActual = row.dataset.isActual === 'true';
+
+          UI.openActualModal({
+            mealId,
+            ingId,
+            mealName,
+            ingName,
+            unit,
+            plannedQuantity,
+            actualQuantity,
+            isActual
+          });
+        };
+
+        row.addEventListener('click', handleOpen);
+        row.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleOpen();
+          }
+        });
+      });
     }
 
     // Consolidated Daily Summary + Deviation

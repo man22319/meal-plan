@@ -4,23 +4,76 @@
 // Uses javascript-lp-solver (loaded as global `solver` via vendor script).
 // Mixed-Integer Linear Programming with binary selection variables (z_ij),
 // serving bounds (minServings / maxServings), meal ingredient limits,
-// and deviation linearization with d+/d- auxiliary variables.
+// deviation linearization with d+/d- auxiliary variables,
+// and immutable actual portion observation locking.
 
-import { state } from './state.js';
+import { state, ensureId } from './state.js';
 import { Validation } from './validation.js';
+
+export function resolveMealAndIngIds(mealRef, ingRef) {
+  let mealId = (mealRef && typeof mealRef === 'object') ? mealRef.id : mealRef;
+  let ingId = (ingRef && typeof ingRef === 'object') ? ingRef.id : ingRef;
+
+  if (typeof mealRef === 'number' && state.meals[mealRef]) {
+    mealId = ensureId(state.meals[mealRef], 'meal');
+  } else if (typeof mealRef === 'string') {
+    const foundMeal = state.meals.find(m => m.id === mealRef || m.name === mealRef);
+    if (foundMeal) mealId = ensureId(foundMeal, 'meal');
+  }
+
+  if (typeof ingRef === 'number' && state.ingredients[ingRef]) {
+    ingId = ensureId(state.ingredients[ingRef], 'ing');
+  } else if (typeof ingRef === 'string') {
+    const foundIng = state.ingredients.find(i => i.id === ingRef || i.name === ingRef);
+    if (foundIng) ingId = ensureId(foundIng, 'ing');
+  }
+
+  return { mealId: mealId || String(mealRef), ingId: ingId || String(ingRef) };
+}
+
+export function getActualRecord(meal, ing, mealIdx, _ingIdx) {
+  if (!state.actuals || typeof state.actuals !== 'object') return null;
+  const mealId = meal?.id;
+  const ingId = ing?.id;
+  const mealName = meal?.name;
+  const ingName = ing?.name;
+
+  if (mealId && ingId && state.actuals[`${mealId}_${ingId}`]) {
+    return state.actuals[`${mealId}_${ingId}`];
+  }
+  if (ingId && state.actuals[`${mealIdx}_${ingId}`]) {
+    return state.actuals[`${mealIdx}_${ingId}`];
+  }
+  if (mealId && ingName && state.actuals[`${mealId}_${ingName}`]) {
+    return state.actuals[`${mealId}_${ingName}`];
+  }
+  if (mealName && ingName && state.actuals[`${mealName}_${ingName}`]) {
+    return state.actuals[`${mealName}_${ingName}`];
+  }
+  if (ingName && state.actuals[`${mealIdx}_${ingName}`]) {
+    return state.actuals[`${mealIdx}_${ingName}`];
+  }
+  return null;
+}
 
 export const Optimization = {
   /**
    * Runs validation, builds MILP model, solves, and writes state.result.
-   * Returns { errors: string[] } if validation or structural feasibility fails,
-   *         { result: object }   on success.
+   * preserveActuals: whether to keep recorded actual portion constraints (default: true).
    */
-  solve() {
+  solve({ preserveActuals = true } = {}) {
     const errors = Validation.validateAll();
     if (errors.length > 0) {
       state.result = null;
       return { errors };
     }
+
+    if (!preserveActuals) {
+      state.actuals = {};
+    }
+
+    state.meals.forEach((m, idx) => ensureId(m, `meal_${idx}`));
+    state.ingredients.forEach((ing, idx) => ensureId(ing, `ing_${idx}`));
 
     const { targets, meals, weights, penalties, mealConstraints } = state;
     const ingredients = state.ingredients.map(ing => ({
@@ -71,7 +124,6 @@ export const Optimization = {
     }
 
     // 1. Daily macro constraints (with deviation variables dP and dM)
-    // sum_j sum_i (x_ij * Macro_i) + dM_m - dP_m = target_m
     macros.forEach((m, mi) => {
       const c = `daily_${m}`;
       model.constraints[c] = { equal: targets[m] };
@@ -81,7 +133,6 @@ export const Optimization = {
     });
 
     // 2. Meal calorie allocation constraints (soft target per meal)
-    // sum_i (x_ij * cal_i) + mdM_j - mdP_j = mealTargetCal_j
     meals.forEach((meal, j) => {
       const tgt = (meal.pct / 100) * targets.calories;
       if (tgt <= 0) return;
@@ -119,79 +170,114 @@ export const Optimization = {
         availPenalty = availabilityOutPenalty;
       }
 
-      meals.forEach((_, j) => {
+      meals.forEach((meal, j) => {
         const v_x = `x_${i}_${j}`;
         const v_z = `z_${i}_${j}`;
         const v_excess = `excess_${i}_${j}`;
 
-        // Continuous servings variable entry with minute quantity penalty & availability penalty
-        const xEntry = {
-          cost: quantityPenalty + availPenalty
-        };
+        const actualRec = getActualRecord(meal, ing, j, i);
+        const isRecorded = Boolean(actualRec && typeof actualRec.actualQuantity === 'number');
 
-        // Contribute to daily macros
-        macros.forEach(m => {
-          xEntry[`daily_${m}`] = ing[m];
-        });
-
-        // Contribute to meal calories
-        xEntry[`meal_${j}`] = ing.calories;
-
-        // Soft boundary preference: penalize servings above preferred baseline
-        if (maxS > prefS) {
-          const softBnd = `soft_pref_${i}_${j}`;
-          model.constraints[softBnd] = { max: prefS };
-          xEntry[softBnd] = 1;
-          model.variables[v_excess] = {
-            cost: boundaryExcessPenalty,
-            [softBnd]: -1
-          };
-        }
-
-        if (needsBinaries) {
-          model.binaries[v_z] = 1;
-
-          const zEntry = {
-            cost: simplicityPenalty + (availPenalty > 0 ? availPenalty * 0.5 : 0)
+        if (isRecorded) {
+          // Recorded actual quantity is an immutable observation
+          const sActual = actualRec.actualQuantity / (ing.servingSize || 100);
+          const xEntry = {
+            cost: 0
           };
 
-          // Link upper bound: x_ij - maxServings_i * z_ij <= 0
-          const linkMax = `link_max_${i}_${j}`;
-          model.constraints[linkMax] = { max: 0 };
-          xEntry[linkMax] = 1;
-          zEntry[linkMax] = -maxS;
+          macros.forEach(m => {
+            xEntry[`daily_${m}`] = ing[m];
+          });
+          xEntry[`meal_${j}`] = ing.calories;
 
-          // Link lower bound: x_ij - minServings_i * z_ij >= 0 (if minServings > 0)
-          if (minS > 0) {
-            const linkMin = `link_min_${i}_${j}`;
-            model.constraints[linkMin] = { min: 0 };
-            xEntry[linkMin] = 1;
-            zEntry[linkMin] = -minS;
+          // Lock variable exactly to recorded physical portion
+          const fixBnd = `fix_${i}_${j}`;
+          model.constraints[fixBnd] = { equal: sActual };
+          xEntry[fixBnd] = 1;
+
+          if (needsBinaries) {
+            model.binaries[v_z] = 1;
+            const isSelected = sActual > 0.001;
+            const zEntry = { cost: 0 };
+            const fixZ = `fix_z_${i}_${j}`;
+            model.constraints[fixZ] = { equal: isSelected ? 1 : 0 };
+            zEntry[fixZ] = 1;
+
+            if (isSelected) {
+              if (minIngPerMeal > 0) zEntry[`meal_ing_min_${j}`] = 1;
+              if (maxIngPerMeal > 0) zEntry[`meal_ing_max_${j}`] = 1;
+            }
+            model.variables[v_z] = zEntry;
           }
 
-          if (minIngPerMeal > 0) zEntry[`meal_ing_min_${j}`] = 1;
-          if (maxIngPerMeal > 0) zEntry[`meal_ing_max_${j}`] = 1;
-
-          model.variables[v_z] = zEntry;
+          model.variables[v_x] = xEntry;
         } else {
-          // Direct bounds for continuous LP
-          const bndMax = `bound_max_${i}_${j}`;
-          model.constraints[bndMax] = { max: maxS };
-          xEntry[bndMax] = 1;
+          // Unfixed decision variable
+          const xEntry = {
+            cost: quantityPenalty + availPenalty
+          };
 
-          if (minS > 0) {
-            const bndMin = `bound_min_${i}_${j}`;
-            model.constraints[bndMin] = { min: minS };
-            xEntry[bndMin] = 1;
+          macros.forEach(m => {
+            xEntry[`daily_${m}`] = ing[m];
+          });
+          xEntry[`meal_${j}`] = ing.calories;
+
+          // Soft boundary preference: penalize servings above preferred baseline
+          if (maxS > prefS) {
+            const softBnd = `soft_pref_${i}_${j}`;
+            model.constraints[softBnd] = { max: prefS };
+            xEntry[softBnd] = 1;
+            model.variables[v_excess] = {
+              cost: boundaryExcessPenalty,
+              [softBnd]: -1
+            };
           }
-        }
 
-        if (ing.quantityMode === 'discrete') {
-          if (!model.ints) model.ints = {};
-          model.ints[v_x] = 1;
-        }
+          if (needsBinaries) {
+            model.binaries[v_z] = 1;
 
-        model.variables[v_x] = xEntry;
+            const zEntry = {
+              cost: simplicityPenalty + (availPenalty > 0 ? availPenalty * 0.5 : 0)
+            };
+
+            // Link upper bound: x_ij - maxServings_i * z_ij <= 0
+            const linkMax = `link_max_${i}_${j}`;
+            model.constraints[linkMax] = { max: 0 };
+            xEntry[linkMax] = 1;
+            zEntry[linkMax] = -maxS;
+
+            // Link lower bound: x_ij - minServings_i * z_ij >= 0 (if minServings > 0)
+            if (minS > 0) {
+              const linkMin = `link_min_${i}_${j}`;
+              model.constraints[linkMin] = { min: 0 };
+              xEntry[linkMin] = 1;
+              zEntry[linkMin] = -minS;
+            }
+
+            if (minIngPerMeal > 0) zEntry[`meal_ing_min_${j}`] = 1;
+            if (maxIngPerMeal > 0) zEntry[`meal_ing_max_${j}`] = 1;
+
+            model.variables[v_z] = zEntry;
+          } else {
+            // Direct bounds for continuous LP
+            const bndMax = `bound_max_${i}_${j}`;
+            model.constraints[bndMax] = { max: maxS };
+            xEntry[bndMax] = 1;
+
+            if (minS > 0) {
+              const bndMin = `bound_min_${i}_${j}`;
+              model.constraints[bndMin] = { min: minS };
+              xEntry[bndMin] = 1;
+            }
+          }
+
+          if (ing.quantityMode === 'discrete') {
+            if (!model.ints) model.ints = {};
+            model.ints[v_x] = 1;
+          }
+
+          model.variables[v_x] = xEntry;
+        }
       });
     });
 
@@ -215,6 +301,29 @@ export const Optimization = {
     return { result: state.result };
   },
 
+  recordActual(mealRef, ingRef, actualQuantity, plannedQuantityAtRecord) {
+    const { mealId, ingId } = resolveMealAndIngIds(mealRef, ingRef);
+    if (!state.actuals) state.actuals = {};
+    const key = `${mealId}_${ingId}`;
+    state.actuals[key] = {
+      actualQuantity: Number(actualQuantity),
+      plannedQuantityAtRecord: typeof plannedQuantityAtRecord === 'number' ? plannedQuantityAtRecord : Number(actualQuantity)
+    };
+    return Optimization.solve({ preserveActuals: true });
+  },
+
+  clearActual(mealRef, ingRef) {
+    const { mealId, ingId } = resolveMealAndIngIds(mealRef, ingRef);
+    if (!state.actuals) return Optimization.solve({ preserveActuals: true });
+    delete state.actuals[`${mealId}_${ingId}`];
+    return Optimization.solve({ preserveActuals: true });
+  },
+
+  clearAllActuals() {
+    state.actuals = {};
+    return Optimization.solve({ preserveActuals: false });
+  },
+
   _extract(raw) {
     const { meals, targets } = state;
     const ingredients = state.ingredients.map(ing => ({
@@ -233,30 +342,81 @@ export const Optimization = {
       let mCal = 0, mPro = 0, mCarb = 0, mFat = 0;
 
       ingredients.forEach((ing, i) => {
+        const actualRec = getActualRecord(meal, ing, j, i);
+        const isActual = Boolean(actualRec && typeof actualRec.actualQuantity === 'number');
+
         let s = raw[`x_${i}_${j}`] || 0;
         const z = raw[`z_${i}_${j}`] || 0;
-        if (ing.quantityMode === 'discrete') {
-          s = Math.round(s);
-        }
-        if (s > 0.001) {
-          items.push({
-            name: ing.name,
-            quantity: s * ing.servingSize,
-            unit: ing.unit,
-            servings: s,
-            selected: z > 0.5,
-            quantityMode: ing.quantityMode || 'continuous',
-            availability: ing.availability || 'normal'
-          });
-          mCal += s * ing.calories;
-          mPro += s * ing.protein;
-          mCarb += s * ing.carbs;
-          mFat += s * ing.fat;
+
+        if (isActual) {
+          const actualQuantity = Number(actualRec.actualQuantity);
+          const plannedQuantity = typeof actualRec.plannedQuantityAtRecord === 'number'
+            ? actualRec.plannedQuantityAtRecord
+            : Math.round((s * ing.servingSize) * 100) / 100;
+          const displayQuantity = actualQuantity;
+          const servings = displayQuantity / (ing.servingSize || 100);
+
+          if (servings > 0.001 || z > 0.5 || actualQuantity > 0) {
+            items.push({
+              id: ing.id,
+              mealId: meal.id,
+              mealIdx: j,
+              name: ing.name,
+              quantity: displayQuantity,
+              displayQuantity,
+              plannedQuantity,
+              actualQuantity,
+              isActual: true,
+              unit: ing.unit,
+              servings,
+              servingSize: ing.servingSize,
+              selected: servings > 0.001 || z > 0.5,
+              quantityMode: ing.quantityMode || 'continuous',
+              availability: ing.availability || 'normal'
+            });
+
+            mCal += servings * ing.calories;
+            mPro += servings * ing.protein;
+            mCarb += servings * ing.carbs;
+            mFat += servings * ing.fat;
+          }
+        } else {
+          if (ing.quantityMode === 'discrete') {
+            s = Math.round(s);
+          }
+          if (s > 0.001) {
+            const plannedQuantity = s * ing.servingSize;
+            const displayQuantity = plannedQuantity;
+
+            items.push({
+              id: ing.id,
+              mealId: meal.id,
+              mealIdx: j,
+              name: ing.name,
+              quantity: displayQuantity,
+              displayQuantity,
+              plannedQuantity,
+              actualQuantity: null,
+              isActual: false,
+              unit: ing.unit,
+              servings: s,
+              servingSize: ing.servingSize,
+              selected: z > 0.5,
+              quantityMode: ing.quantityMode || 'continuous',
+              availability: ing.availability || 'normal'
+            });
+
+            mCal += s * ing.calories;
+            mPro += s * ing.protein;
+            mCarb += s * ing.carbs;
+            mFat += s * ing.fat;
+          }
         }
       });
 
       const tgt = (meal.pct / 100) * targets.calories;
       return {
+        id: meal.id,
         name: meal.name,
         pct: meal.pct,
         items,
@@ -297,3 +457,4 @@ export const Optimization = {
     return { mealResults, totals, deviations, approximate };
   }
 };
+

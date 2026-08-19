@@ -17,10 +17,20 @@ const initSolver = new Function('window', 'self', 'exports', 'module', vendorCod
 initSolver(solverSandbox, solverSandbox, undefined, undefined);
 global.solver = solverSandbox.solver;
 
+if (typeof global.localStorage === 'undefined') {
+  const store = new Map();
+  global.localStorage = {
+    getItem(k) { return store.has(k) ? store.get(k) : null; },
+    setItem(k, v) { store.set(k, String(v)); },
+    removeItem(k) { store.delete(k); },
+    clear() { store.clear(); }
+  };
+}
+
 import { Optimization } from '../src/core/solver.js';
-import { state } from '../src/core/state.js';
+import { state, STORAGE_KEY, SETTINGS_KEY, TARGETS_KEY, MEALS_KEY, RESULT_KEY, DEFAULT_TARGETS, DEFAULT_MEALS } from '../src/core/state.js';
 import { Validation } from '../src/core/validation.js';
-import { ImportExport } from '../src/io/persistence.js';
+import { Persistence, ImportExport } from '../src/io/persistence.js';
 
 // Base nutritional target
 export const DAILY_TARGET = {
@@ -716,6 +726,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Run Availability Test Suite
   runAvailabilityTestSuite();
 
+  // Run Persistence & Refresh-Resistance Test Suite
+  runPersistenceTestSuite();
+
+  // Run Actual Portion Recording & Re-optimization Test Suite
+  runActualPortionTestSuite();
+
   console.log('\n');
   const sim = runMealSplitSimulations();
 
@@ -915,4 +931,408 @@ export function runAvailabilityTestSuite() {
   }
   return results;
 }
+
+// ══════════════════════════════════════════════════════════════════
+// PERSISTENCE & REFRESH-RESISTANCE TEST SUITE
+// ══════════════════════════════════════════════════════════════════
+
+export function runPersistenceTestSuite() {
+  console.log('═══════════════════════════════════════════════════════════════════');
+  console.log(' RUNNING PERSISTENCE & REFRESH-RESISTANCE TEST SUITE              ');
+  console.log('═══════════════════════════════════════════════════════════════════\n');
+
+  const results = [];
+
+  // PS-1: Persist and restore working state (targets, meals, ingredients, settings, results)
+  {
+    global.localStorage.clear();
+    state.targets = { calories: 2500, protein: 180, carbs: 250, fat: 70 };
+    state.meals = [
+      { name: 'Breakfast', pct: 30 },
+      { name: 'Lunch', pct: 30 },
+      { name: 'Dinner', pct: 40 }
+    ];
+    state.ingredients = [
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 1, maxServings: 4, quantityMode: 'continuous', availability: 'normal' },
+      { name: 'Eggs', servingSize: 50, unit: 'g', calories: 72, protein: 6.3, carbs: 0.4, fat: 4.8, minServings: 2, maxServings: 5, quantityMode: 'discrete', availability: 'low' }
+    ];
+    state.mealConstraints = { minIngredients: 2, maxIngredients: 3 };
+    state.weights = { calories: 1.2, protein: 1.5, carbs: 0.6, fat: 0.6, mealAllocation: 0.4 };
+    state.result = {
+      solved: true,
+      feasible: true,
+      approximate: false,
+      mealResults: [{ name: 'Breakfast', pct: 30, calories: 750, protein: 54, carbs: 75, fat: 21, items: [] }],
+      totals: { calories: 2500, protein: 180, carbs: 250, fat: 70 },
+      deviations: { calories: { absolute: 0, percentage: 0 } }
+    };
+
+    Persistence.save();
+
+    // Verify localStorage has keys
+    const hasIngredients = !!global.localStorage.getItem(STORAGE_KEY);
+    const hasSettings = !!global.localStorage.getItem(SETTINGS_KEY);
+    const hasTargets = !!global.localStorage.getItem(TARGETS_KEY);
+    const hasMeals = !!global.localStorage.getItem(MEALS_KEY);
+    const hasResult = !!global.localStorage.getItem(RESULT_KEY);
+
+    // Reset in-memory state to blanks/defaults
+    state.targets = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    state.meals = [];
+    state.ingredients = [];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 1 };
+    state.weights = { calories: 1, protein: 1, carbs: 1, fat: 1, mealAllocation: 1 };
+    state.result = null;
+
+    // Load from persistence
+    const loaded = Persistence.load();
+
+    const passed = loaded &&
+      hasIngredients && hasSettings && hasTargets && hasMeals && hasResult &&
+      state.targets.calories === 2500 &&
+      state.targets.protein === 180 &&
+      state.meals.length === 3 &&
+      state.meals[0].pct === 30 &&
+      state.ingredients.length === 2 &&
+      state.ingredients[1].quantityMode === 'discrete' &&
+      state.ingredients[1].availability === 'low' &&
+      state.mealConstraints.minIngredients === 2 &&
+      state.weights.protein === 1.5 &&
+      state.result !== null &&
+      state.result.totals.calories === 2500;
+
+    console.log(`[PS-1] Full State Persistence & Restoration:`);
+    console.log(`       Stored Keys Present: targets=${hasTargets}, meals=${hasMeals}, ingredients=${hasIngredients}, settings=${hasSettings}, result=${hasResult}`);
+    console.log(`       Restored Targets: kcal=${state.targets.calories}, P=${state.targets.protein}`);
+    console.log(`       Restored Meals: count=${state.meals.length}, M1=${state.meals[0]?.name} (${state.meals[0]?.pct}%)`);
+    console.log(`       Restored Results: totals.calories=${state.result?.totals?.calories}`);
+    console.log(`       Status: ${passed ? 'PASSED (Working state successfully persisted and restored)' : 'FAILED'}\n`);
+    results.push({ name: 'PS-1: State Persistence & Restoration', passed });
+  }
+
+  // PS-2: Reset Data clears storage and restores defaults
+  {
+    Persistence.resetToDefaults();
+
+    const targetsCleared = global.localStorage.getItem(TARGETS_KEY) === null;
+    const mealsCleared = global.localStorage.getItem(MEALS_KEY) === null;
+    const ingCleared = global.localStorage.getItem(STORAGE_KEY) === null;
+    const settingsCleared = global.localStorage.getItem(SETTINGS_KEY) === null;
+    const resultCleared = global.localStorage.getItem(RESULT_KEY) === null;
+
+    const passed = targetsCleared && mealsCleared && ingCleared && settingsCleared && resultCleared &&
+      state.targets.calories === DEFAULT_TARGETS.calories &&
+      state.meals.length === DEFAULT_MEALS.length &&
+      state.result === null;
+
+    console.log(`[PS-2] Reset to Defaults Clears Persistent Storage:`);
+    console.log(`       Keys Cleared: ${targetsCleared && mealsCleared && ingCleared && settingsCleared && resultCleared}`);
+    console.log(`       Default Targets kcal: ${state.targets.calories}`);
+    console.log(`       Default Meals count: ${state.meals.length}`);
+    console.log(`       Status: ${passed ? 'PASSED (Reset properly removes stored keys and restores defaults)' : 'FAILED'}\n`);
+    results.push({ name: 'PS-2: Reset Data Storage Clearance', passed });
+  }
+
+  // PS-3: Non-overwriting of valid saved state on initialization
+  {
+    global.localStorage.clear();
+    // Simulate user modified targets and meals before reload
+    global.localStorage.setItem(TARGETS_KEY, JSON.stringify({ calories: 3000, protein: 200, carbs: 350, fat: 80 }));
+    global.localStorage.setItem(MEALS_KEY, JSON.stringify([{ name: 'Solo Big Meal', pct: 100 }]));
+
+    Persistence.load();
+
+    const passed = state.targets.calories === 3000 &&
+      state.targets.protein === 200 &&
+      state.meals.length === 1 &&
+      state.meals[0].name === 'Solo Big Meal';
+
+    console.log(`[PS-3] Preservation of Valid Custom State on Init:`);
+    console.log(`       Loaded Target Calories: ${state.targets.calories} (expected 3000)`);
+    console.log(`       Loaded Meals: ${state.meals[0]?.name} (${state.meals[0]?.pct}%)`);
+    console.log(`       Status: ${passed ? 'PASSED (Custom saved state preserved on initialization)' : 'FAILED'}\n`);
+    results.push({ name: 'PS-3: Preservation on Init', passed });
+  }
+
+  // PS-4: Graceful handling of corrupted storage
+  {
+    global.localStorage.setItem(TARGETS_KEY, 'invalid json {[');
+    global.localStorage.setItem(MEALS_KEY, JSON.stringify([{ invalid: true }]));
+
+    const result = Persistence.load();
+
+    const passed = typeof result === 'boolean' &&
+      state.targets.calories === 3000 && // preserved or default
+      state.meals.length >= 1;
+
+    console.log(`[PS-4] Error Handling for Corrupted Storage:`);
+    console.log(`       Load result: ${result}`);
+    console.log(`       Status: ${passed ? 'PASSED (Corrupted data does not crash the application)' : 'FAILED'}\n`);
+    results.push({ name: 'PS-4: Corrupted Storage Fallback', passed });
+  }
+
+  const allPassed = results.every(r => r.passed);
+  if (!allPassed) {
+    console.error('ERROR: Some persistence tests failed!');
+    process.exitCode = 1;
+  }
+  return results;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ACTUAL PORTION RECORDING & RE-OPTIMIZATION TEST SUITE
+// ══════════════════════════════════════════════════════════════════
+
+export function runActualPortionTestSuite() {
+  console.log('═══════════════════════════════════════════════════════════════════');
+  console.log(' RUNNING ACTUAL PORTION RECORDING & RE-OPTIMIZATION TEST SUITE     ');
+  console.log('═══════════════════════════════════════════════════════════════════\n');
+
+  const results = [];
+
+  function resetToTestDefaults() {
+    Persistence.resetToDefaults();
+    state.targets = { calories: 2335, protein: 151, carbs: 291, fat: 62 };
+    state.meals = [
+      { id: 'meal_0', name: 'Breakfast', pct: 40 },
+      { id: 'meal_1', name: 'Lunch', pct: 20 },
+      { id: 'meal_2', name: 'Dinner', pct: 40 }
+    ];
+    state.ingredients = [
+      { id: 'ing_chk', name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, quantityMode: 'continuous', availability: 'normal' },
+      { id: 'ing_yuc', name: 'Yuca', servingSize: 103, unit: 'g', calories: 180, protein: 3, carbs: 42, fat: 0, minServings: 0, maxServings: 5, quantityMode: 'continuous', availability: 'normal' },
+      { id: 'ing_mlk', name: 'Whole Milk', servingSize: 240, unit: 'mL', calories: 150, protein: 8, carbs: 12, fat: 8, minServings: 0, maxServings: 2, quantityMode: 'continuous', availability: 'normal' }
+    ];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.penalties = { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002, availabilityLow: 0.0005, availabilityOut: 0.002 };
+    state.actuals = {};
+  }
+
+  // AP-1: Single actual portion recording locks quantity and re-optimizes
+  {
+    resetToTestDefaults();
+    const initial = Optimization.solve({ preserveActuals: false });
+    const initChk = initial.result.mealResults[0].items.find(i => i.name === 'Chicken');
+    const initPlannedQty = initChk ? initChk.quantity : 100;
+
+    // Record actual portion for Breakfast Chicken = 117g
+    const reopt = Optimization.recordActual('meal_0', 'ing_chk', 117, initPlannedQty);
+    const bItems = reopt.result ? reopt.result.mealResults[0].items : [];
+    const bChk = bItems.find(i => i.name === 'Chicken');
+
+    const isLocked = bChk && bChk.isActual === true && Math.abs(bChk.actualQuantity - 117) < 0.01 && Math.abs(bChk.quantity - 117) < 0.01;
+    const plannedPreserved = bChk && Math.abs(bChk.plannedQuantity - initPlannedQty) < 0.01;
+    const macrosAccurate = reopt.result && Math.abs(reopt.result.deviations.calories.absolute) < 5;
+
+    const passed = Boolean(isLocked && plannedPreserved && macrosAccurate);
+
+    console.log(`[AP-1] Single Portion Recording & Re-optimization:`);
+    console.log(`       Chicken in Breakfast: ${bChk?.quantity}g ACTUAL (planned ${bChk?.plannedQuantity?.toFixed(1)}g), serv=${bChk?.servings?.toFixed(2)}`);
+    console.log(`       Daily Totals: kcal=${reopt.result?.totals?.calories?.toFixed(0)}, P=${reopt.result?.totals?.protein?.toFixed(1)}g`);
+    console.log(`       Status: ${passed ? 'PASSED (Portion locked, planned preserved, remaining re-optimized)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-1: Single Portion Recording & Re-optimization', passed });
+  }
+
+  // AP-2: Sequential daily workflow (Breakfast -> Lunch -> Dinner)
+  {
+    resetToTestDefaults();
+    // Step 1: Baseline solve
+    Optimization.solve({ preserveActuals: false });
+
+    // Step 2: Record Breakfast Chicken = 125g
+    Optimization.recordActual('meal_0', 'ing_chk', 125);
+
+    // Step 3: Record Lunch Yuca = 85g
+    const outcome = Optimization.recordActual('meal_1', 'ing_yuc', 85);
+
+    const bChk = outcome.result?.mealResults[0].items.find(i => i.name === 'Chicken');
+    const lYuc = outcome.result?.mealResults[1].items.find(i => i.name === 'Yuca');
+    const dItems = outcome.result?.mealResults[2].items || [];
+
+    const passed = bChk?.isActual === true && Math.abs(bChk.actualQuantity - 125) < 0.01 &&
+                   lYuc?.isActual === true && Math.abs(lYuc.actualQuantity - 85) < 0.01 &&
+                   dItems.length > 0 &&
+                   Math.abs(outcome.result.deviations.calories.absolute) < 5;
+
+    console.log(`[AP-2] Sequential Daily Workflow:`);
+    console.log(`       Breakfast Chicken: ${bChk?.quantity}g ACTUAL (locked=${bChk?.isActual})`);
+    console.log(`       Lunch Yuca: ${lYuc?.quantity}g ACTUAL (locked=${lYuc?.isActual})`);
+    console.log(`       Dinner items dynamically adjusted: count=${dItems.length}`);
+    console.log(`       Status: ${passed ? 'PASSED (Multi-meal sequential locks preserved)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-2: Sequential Daily Workflow', passed });
+  }
+
+  // AP-3: Re-solving after changing target preserves recorded actuals
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    Optimization.recordActual('meal_0', 'ing_chk', 117);
+
+    // User changes target to 2500 kcal and clicks SOLVE (default preserveActuals = true)
+    state.targets.calories = 2500;
+    const reSolved = Optimization.solve({ preserveActuals: true });
+
+    const bChk = reSolved.result?.mealResults[0].items.find(i => i.name === 'Chicken');
+    const passed = bChk?.isActual === true && Math.abs(bChk.actualQuantity - 117) < 0.01 &&
+                   Math.abs(reSolved.result.totals.calories - 2500) < 5;
+
+    console.log(`[AP-3] Re-solving After Changing Target:`);
+    console.log(`       Breakfast Chicken: ${bChk?.quantity}g ACTUAL (expected 117g)`);
+    console.log(`       New Total Calories: ${reSolved.result?.totals?.calories?.toFixed(0)} kcal (target 2500)`);
+    console.log(`       Status: ${passed ? 'PASSED (Actuals preserved when target changed and re-solved)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-3: Re-solving After Target Change', passed });
+  }
+
+  // AP-4: Re-solving after changing meal percentage preserves recorded actuals
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    Optimization.recordActual('meal_0', 'ing_chk', 117);
+
+    // Change meal splits to 30 / 35 / 35
+    state.meals[0].pct = 30;
+    state.meals[1].pct = 35;
+    state.meals[2].pct = 35;
+
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const bChk = outcome.result?.mealResults[0].items.find(i => i.name === 'Chicken');
+    const passed = bChk?.isActual === true && Math.abs(bChk.actualQuantity - 117) < 0.01;
+
+    console.log(`[AP-4] Re-solving After Changing Meal Percentage:`);
+    console.log(`       Breakfast Chicken: ${bChk?.quantity}g ACTUAL`);
+    console.log(`       Status: ${passed ? 'PASSED (Actuals preserved across meal split adjustments)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-4: Meal Split Change Preservation', passed });
+  }
+
+  // AP-5: Re-solving after changing ingredient nutrition values
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    Optimization.recordActual('meal_0', 'ing_chk', 117);
+
+    // User updates Chicken definition (e.g. higher protein)
+    const chkDef = state.ingredients.find(i => i.id === 'ing_chk');
+    chkDef.protein = 35; // increased from 31
+
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const bChk = outcome.result?.mealResults[0].items.find(i => i.name === 'Chicken');
+    const passed = bChk?.isActual === true && Math.abs(bChk.actualQuantity - 117) < 0.01;
+
+    console.log(`[AP-5] Re-solving After Changing Ingredient Definition:`);
+    console.log(`       Breakfast Chicken: ${bChk?.quantity}g ACTUAL with updated 35g protein/serv`);
+    console.log(`       Status: ${passed ? 'PASSED (Actuals use updated ingredient nutrition smoothly)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-5: Ingredient Definition Update', passed });
+  }
+
+  // AP-6: Physical observation exceeding configured max bounds
+  {
+    resetToTestDefaults();
+    // Configure strict maxServings: 1.0 (100g max)
+    const chkDef = state.ingredients.find(i => i.id === 'ing_chk');
+    chkDef.maxServings = 1.0;
+
+    // User physically consumed 137g (1.37 serv > 1.0 maxServings)
+    const outcome = Optimization.recordActual('meal_0', 'ing_chk', 137);
+    const bChk = outcome.result?.mealResults[0].items.find(i => i.name === 'Chicken');
+    const passed = !outcome.errors && outcome.result && bChk?.isActual === true && Math.abs(bChk.quantity - 137) < 0.01;
+
+    console.log(`[AP-6] Physical Observation Exceeding Configured Max Bound (137g > 100g max):`);
+    console.log(`       Feasible: ${!outcome.errors && !!outcome.result}`);
+    console.log(`       Chicken Quantity: ${bChk?.quantity}g ACTUAL (${bChk?.servings?.toFixed(2)} serv)`);
+    console.log(`       Status: ${passed ? 'PASSED (Observation honoured without failing feasibility)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-6: Physical Bound Exceedance', passed });
+  }
+
+  // AP-7: Discrete ingredients remain strictly integer when unfixed
+  {
+    resetToTestDefaults();
+    state.ingredients.push({
+      id: 'ing_egg',
+      name: 'Eggs',
+      servingSize: 50,
+      unit: 'g',
+      calories: 72,
+      protein: 6.3,
+      carbs: 0.4,
+      fat: 4.8,
+      minServings: 0,
+      maxServings: 4,
+      quantityMode: 'discrete',
+      availability: 'normal'
+    });
+
+    Optimization.solve({ preserveActuals: false });
+    const outcome = Optimization.recordActual('meal_0', 'ing_chk', 117);
+
+    const allEggs = [];
+    outcome.result?.mealResults.forEach(m => {
+      m.items.forEach(item => {
+        if (item.name === 'Eggs') allEggs.push(item);
+      });
+    });
+
+    const discretePreserved = allEggs.every(e => Number.isInteger(e.servings));
+    const passed = Boolean(allEggs.length > 0 && discretePreserved);
+
+    console.log(`[AP-7] Discrete Ingredients Domain Preservation:`);
+    allEggs.forEach(e => console.log(`       Meal item: ${e.name} = ${e.servings} serv (${e.quantity} ${e.unit})`));
+    console.log(`       Status: ${passed ? 'PASSED (Unfixed discrete variables strictly remain integers)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-7: Discrete Domain Preservation', passed });
+  }
+
+  // AP-8: Clearing actual portion restores flexible optimization
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    Optimization.recordActual('meal_0', 'ing_chk', 117);
+
+    // Clear actual
+    const outcome = Optimization.clearActual('meal_0', 'ing_chk');
+    const bChk = outcome.result?.mealResults[0].items.find(i => i.name === 'Chicken');
+    const passed = bChk ? bChk.isActual === false && bChk.actualQuantity === null : true;
+
+    console.log(`[AP-8] Clearing Actual Portion:`);
+    console.log(`       Breakfast Chicken isActual: ${bChk?.isActual} (actualQuantity: ${bChk?.actualQuantity})`);
+    console.log(`       Status: ${passed ? 'PASSED (Clearing restored flexible optimization)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-8: Clearing Actual Portion', passed });
+  }
+
+  // AP-9: Persistence and restoration of actual portions
+  {
+    resetToTestDefaults();
+    global.localStorage.clear();
+    Optimization.solve({ preserveActuals: false });
+    Optimization.recordActual('meal_0', 'ing_chk', 117, 100);
+    Persistence.save();
+
+    // Verify localStorage has actuals in result
+    const rawResult = global.localStorage.getItem(RESULT_KEY);
+    const parsed = JSON.parse(rawResult);
+    const hasActualsInStorage = parsed && parsed.actuals && Object.keys(parsed.actuals).length > 0;
+
+    // Clear memory state and reload
+    state.actuals = {};
+    state.result = null;
+    Persistence.load();
+
+    const loadedChk = state.result?.mealResults[0].items.find(i => i.name === 'Chicken');
+    const passed = hasActualsInStorage && state.actuals['meal_0_ing_chk'] && loadedChk?.isActual === true && Math.abs(loadedChk.actualQuantity - 117) < 0.01;
+
+    console.log(`[AP-9] Persistence and Restoration of Actual Portions:`);
+    console.log(`       In Storage: ${hasActualsInStorage}`);
+    console.log(`       Restored Chicken isActual: ${loadedChk?.isActual}, actual=${loadedChk?.actualQuantity}g`);
+    console.log(`       Status: ${passed ? 'PASSED (Actuals saved and restored across reloads)' : 'FAILED'}\n`);
+    results.push({ name: 'AP-9: Persistence and Restoration', passed });
+  }
+
+  const allPassed = results.every(r => r.passed);
+  if (!allPassed) {
+    console.error('ERROR: Some actual portion tests failed!');
+    process.exitCode = 1;
+  }
+  return results;
+}
+
+
 

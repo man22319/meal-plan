@@ -22,6 +22,7 @@ function setupEventListeners() {
       UI.clearErrors();
       UI.renderResults();
     }
+    Persistence.save();
   });
 
   // Add ingredient
@@ -63,25 +64,41 @@ function setupEventListeners() {
   // Reset Data
   document.getElementById('clear-data-btn')?.addEventListener('click', () => {
     Persistence.resetToDefaults();
-    state.result = null;
+    UI.renderTargets();
+    UI.renderMeals();
     UI.renderIngredients();
     UI.renderWeights();
     UI.hideResults();
     UI.clearErrors();
   });
 
-  // Advanced toggle
-  const toggle = document.getElementById('advanced-toggle');
-  const body = document.getElementById('advanced-body');
-  toggle?.addEventListener('click', () => {
-    const isOpen = body?.classList.toggle('open');
-    toggle.classList.toggle('open', !!isOpen);
-  });
+  // Tab Navigation
+  const solverTabBtn = document.getElementById('tab-btn-solver');
+  const ingredientsTabBtn = document.getElementById('tab-btn-ingredients');
+  const solverPanel = document.getElementById('tab-solver');
+  const ingredientsPanel = document.getElementById('tab-ingredients');
+
+  function switchTab(target) {
+    const isSolver = target === 'solver';
+    solverTabBtn?.classList.toggle('active', isSolver);
+    solverTabBtn?.setAttribute('aria-selected', isSolver ? 'true' : 'false');
+    ingredientsTabBtn?.classList.toggle('active', !isSolver);
+    ingredientsTabBtn?.setAttribute('aria-selected', !isSolver ? 'true' : 'false');
+
+    solverPanel?.classList.toggle('hidden', !isSolver);
+    solverPanel?.classList.toggle('active', isSolver);
+    ingredientsPanel?.classList.toggle('hidden', isSolver);
+    ingredientsPanel?.classList.toggle('active', !isSolver);
+  }
+
+  solverTabBtn?.addEventListener('click', () => switchTab('solver'));
+  ingredientsTabBtn?.addEventListener('click', () => switchTab('ingredients'));
 
   // Meal count stepper
   document.getElementById('meal-count-dec')?.addEventListener('click', () => {
     if (state.meals.length > 1) {
       state.meals.pop();
+      Persistence.save();
       UI.renderMeals();
     }
   });
@@ -89,6 +106,7 @@ function setupEventListeners() {
   document.getElementById('meal-count-inc')?.addEventListener('click', () => {
     if (state.meals.length < 6) {
       state.meals.push({ name: `Meal ${state.meals.length + 1}`, pct: 0 });
+      Persistence.save();
       UI.renderMeals();
     }
   });
@@ -100,5 +118,8 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.renderMeals();
   UI.renderIngredients();
   UI.renderWeights();
+  if (state.result) {
+    UI.renderResults();
+  }
   setupEventListeners();
 });
