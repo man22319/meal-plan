@@ -158,6 +158,10 @@ export const UI = {
 
     container.innerHTML = state.ingredients.map((ing, i) => {
       const mode = ing.quantityMode === 'discrete' ? 'discrete' : 'continuous';
+      const rawAvail = ing.availability;
+      const avail = (rawAvail === 'low' || rawAvail === 'running_low') ? 'low' : (rawAvail === 'out' || rawAvail === 'almost_out') ? 'out' : 'normal';
+      const availHint = avail === 'low' ? 'Moderate penalty' : avail === 'out' ? 'Minimize usage' : 'Used normally';
+
       return `
       <div class="ingredient-card" data-i="${i}">
         <div class="ing-row ing-name-row">
@@ -168,13 +172,16 @@ export const UI = {
         <div class="ing-grid ing-serving-grid">
           <div class="ing-field">
             <label for="ing-${i}-serv">Serving size</label>
-            <input type="number" id="ing-${i}-serv" value="${ing.servingSize}" min="0" step="1"
-                   data-i="${i}" data-f="servingSize" inputmode="decimal" />
+            <input type="number" id="ing-${i}-serv" value="${ing.servingSize !== undefined && ing.servingSize !== null ? ing.servingSize : ''}" min="0" step="1"
+                   data-i="${i}" data-f="servingSize" placeholder="100" inputmode="decimal" />
           </div>
           <div class="ing-field">
             <label for="ing-${i}-unit">Unit</label>
-            <input type="text" id="ing-${i}-unit" class="unit-input" value="${escAttr(ing.unit)}"
-                   data-i="${i}" data-f="unit" placeholder="g" />
+            <select id="ing-${i}-unit" class="unit-select" data-i="${i}" data-f="unit">
+              <option value="g" ${ing.unit === 'g' ? 'selected' : ''}>g</option>
+              <option value="mL" ${ing.unit === 'mL' ? 'selected' : ''}>mL</option>
+              ${ing.unit && ing.unit !== 'g' && ing.unit !== 'mL' ? `<option value="${escAttr(ing.unit)}" selected>${esc(ing.unit)}</option>` : ''}
+            </select>
           </div>
         </div>
 
@@ -186,26 +193,26 @@ export const UI = {
             <span>Fat</span>
           </div>
           <div class="ing-macro-inputs">
-            <input type="number" aria-label="Calories" value="${ing.calories}" min="0" step="1"
-                   data-i="${i}" data-f="calories" inputmode="decimal" />
-            <input type="number" aria-label="Protein" value="${ing.protein}" min="0" step="0.1"
-                   data-i="${i}" data-f="protein" inputmode="decimal" />
-            <input type="number" aria-label="Carbs" value="${ing.carbs}" min="0" step="0.1"
-                   data-i="${i}" data-f="carbs" inputmode="decimal" />
-            <input type="number" aria-label="Fat" value="${ing.fat}" min="0" step="0.1"
-                   data-i="${i}" data-f="fat" inputmode="decimal" />
+            <input type="number" aria-label="Calories" value="${ing.calories !== undefined && ing.calories !== null ? ing.calories : ''}" min="0" step="1"
+                   data-i="${i}" data-f="calories" placeholder="0" inputmode="decimal" />
+            <input type="number" aria-label="Protein" value="${ing.protein !== undefined && ing.protein !== null ? ing.protein : ''}" min="0" step="0.1"
+                   data-i="${i}" data-f="protein" placeholder="0" inputmode="decimal" />
+            <input type="number" aria-label="Carbs" value="${ing.carbs !== undefined && ing.carbs !== null ? ing.carbs : ''}" min="0" step="0.1"
+                   data-i="${i}" data-f="carbs" placeholder="0" inputmode="decimal" />
+            <input type="number" aria-label="Fat" value="${ing.fat !== undefined && ing.fat !== null ? ing.fat : ''}" min="0" step="0.1"
+                   data-i="${i}" data-f="fat" placeholder="0" inputmode="decimal" />
           </div>
         </div>
 
         <div class="ing-grid ing-bounds-grid">
           <div class="ing-field">
             <label for="ing-${i}-min">Min servings</label>
-            <input type="number" id="ing-${i}-min" value="${typeof ing.minServings === 'number' ? ing.minServings : 0}" min="0" step="0.5"
+            <input type="number" id="ing-${i}-min" value="${ing.minServings !== undefined && ing.minServings !== null ? ing.minServings : ''}" min="0" step="0.5"
                    data-i="${i}" data-f="minServings" placeholder="0" inputmode="decimal" />
           </div>
           <div class="ing-field">
             <label for="ing-${i}-max">Max servings</label>
-            <input type="number" id="ing-${i}-max" value="${typeof ing.maxServings === 'number' ? ing.maxServings : 5}" min="0.1" step="0.5"
+            <input type="number" id="ing-${i}-max" value="${ing.maxServings !== undefined && ing.maxServings !== null ? ing.maxServings : ''}" min="0.1" step="0.5"
                    data-i="${i}" data-f="maxServings" placeholder="5" inputmode="decimal" />
           </div>
         </div>
@@ -226,29 +233,61 @@ export const UI = {
             </button>
           </div>
         </div>
+
+        <div class="ing-mode-row">
+          <div class="ing-mode-header">
+            <label>Availability</label>
+            <span class="ing-mode-hint">${availHint}</span>
+          </div>
+          <div class="segmented-control" role="radiogroup" aria-label="Availability">
+            <button type="button" class="segmented-btn ${avail === 'normal' ? 'active' : ''}"
+                    data-i="${i}" data-availability="normal" role="radio" aria-checked="${avail === 'normal'}">
+              Normal
+            </button>
+            <button type="button" class="segmented-btn ${avail === 'low' ? 'active' : ''}"
+                    data-i="${i}" data-availability="low" role="radio" aria-checked="${avail === 'low'}">
+              Running Low
+            </button>
+            <button type="button" class="segmented-btn ${avail === 'out' ? 'active' : ''}"
+                    data-i="${i}" data-availability="out" role="radio" aria-checked="${avail === 'out'}">
+              Almost Out
+            </button>
+          </div>
+        </div>
       </div>
     `;
     }).join('');
 
-    container.querySelectorAll('input').forEach(input => {
-      input.addEventListener('input', function () {
+    container.querySelectorAll('input, select').forEach(input => {
+      const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
+      input.addEventListener(eventName, function () {
         const idx = parseInt(this.dataset.i, 10);
         const field = this.dataset.f;
         if (field === 'name' || field === 'unit') {
           state.ingredients[idx][field] = this.value;
         } else {
-          const val = parseFloat(this.value);
-          state.ingredients[idx][field] = isNaN(val) ? 0 : val;
+          const val = this.value.trim();
+          state.ingredients[idx][field] = val === '' ? '' : (isNaN(parseFloat(val)) ? '' : parseFloat(val));
         }
         Persistence.save();
       });
     });
 
-    container.querySelectorAll('.segmented-btn').forEach(btn => {
+    container.querySelectorAll('.segmented-btn[data-mode]').forEach(btn => {
       btn.addEventListener('click', function () {
         const idx = parseInt(this.dataset.i, 10);
         const mode = this.dataset.mode;
         state.ingredients[idx].quantityMode = mode;
+        Persistence.save();
+        UI.renderIngredients();
+      });
+    });
+
+    container.querySelectorAll('.segmented-btn[data-availability]').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(this.dataset.i, 10);
+        const avail = this.dataset.availability;
+        state.ingredients[idx].availability = avail;
         Persistence.save();
         UI.renderIngredients();
       });
@@ -265,10 +304,17 @@ export const UI = {
 
   addIngredient() {
     state.ingredients.push({
-      name: '', servingSize: 100, unit: 'g',
-      calories: 0, protein: 0, carbs: 0, fat: 0,
-      minServings: 0, maxServings: 5,
-      quantityMode: 'continuous'
+      name: '',
+      servingSize: '',
+      unit: 'g',
+      calories: '',
+      protein: '',
+      carbs: '',
+      fat: '',
+      minServings: '',
+      maxServings: '',
+      quantityMode: 'continuous',
+      availability: 'normal'
     });
     Persistence.save();
     UI.renderIngredients();

@@ -713,6 +713,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Run Quantity Mode Test Suite
   runQuantityModeTestSuite();
 
+  // Run Availability Test Suite
+  runAvailabilityTestSuite();
+
   console.log('\n');
   const sim = runMealSplitSimulations();
 
@@ -725,5 +728,191 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(`  #${idx + 1}: [${item.splits.join('/')}%] Score=${item.score.toFixed(1)} | Ing/Meal=${pm.ingPerMeal} | MaxPortion=${pm.maxPortion} | kcalDev=${mm.calDev.toFixed(0)}`);
     });
   });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// AVAILABILITY TEST SUITE (NORMAL | RUNNING LOW | ALMOST OUT)
+// ══════════════════════════════════════════════════════════════════
+
+export function runAvailabilityTestSuite() {
+  console.log('═══════════════════════════════════════════════════════════════════');
+  console.log(' RUNNING INGREDIENT AVAILABILITY TEST SUITE                        ');
+  console.log('═══════════════════════════════════════════════════════════════════\n');
+
+  const results = [];
+
+  // Helper to reset state
+  function resetSolverState() {
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.penalties = {
+      simplicity: 0.0005,
+      quantity: 0.00001,
+      boundaryExcess: 0.002,
+      availabilityLow: 0.0005,
+      availabilityOut: 0.002
+    };
+    state.meals = [{ name: 'Single Meal', pct: 100 }];
+    state.targets = { calories: 350, protein: 32, carbs: 30, fat: 5 };
+  }
+
+  // AV-1: Normal ingredients baseline
+  {
+    resetSolverState();
+    state.ingredients = [
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'normal' },
+      { name: 'Turkey', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'normal' },
+      { name: 'Rice', servingSize: 100, unit: 'g', calories: 130, protein: 2.7, carbs: 28.2, fat: 0.3, minServings: 0, maxServings: 5, availability: 'normal' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result?.mealResults[0]?.items || [];
+    const chicken = items.find(i => i.name === 'Chicken')?.servings || 0;
+    const turkey = items.find(i => i.name === 'Turkey')?.servings || 0;
+    const passed = outcome.result && !outcome.errors && (chicken + turkey > 0.9);
+
+    console.log(`[AV-1] Normal Ingredients Baseline:`);
+    console.log(`       Chicken: ${chicken.toFixed(2)} serv, Turkey: ${turkey.toFixed(2)} serv`);
+    console.log(`       Status: ${passed ? 'PASSED (Normal ingredients used standardly)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-1: Normal Baseline', passed });
+  }
+
+  // AV-2: Running Low ingredients are used less when alternative exists
+  {
+    resetSolverState();
+    state.ingredients = [
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'normal' },
+      { name: 'Turkey', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'low' },
+      { name: 'Rice', servingSize: 100, unit: 'g', calories: 130, protein: 2.7, carbs: 28.2, fat: 0.3, minServings: 0, maxServings: 5, availability: 'normal' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result?.mealResults[0]?.items || [];
+    const chicken = items.find(i => i.name === 'Chicken')?.servings || 0;
+    const turkey = items.find(i => i.name === 'Turkey')?.servings || 0;
+    const passed = outcome.result && chicken > 0.9 && turkey < 0.05;
+
+    console.log(`[AV-2] Running Low Disfavoring:`);
+    console.log(`       Chicken (Normal): ${chicken.toFixed(2)} serv, Turkey (Running Low): ${turkey.toFixed(2)} serv`);
+    console.log(`       Status: ${passed ? 'PASSED (Solver strongly preferred Normal over Running Low)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-2: Running Low Preference', passed });
+  }
+
+  // AV-3: Almost Out ingredients used even less than Running Low
+  {
+    resetSolverState();
+    state.targets = { calories: 450, protein: 42, carbs: 30, fat: 6 };
+    state.ingredients = [
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 0.5, availability: 'normal' },
+      { name: 'Turkey', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'low' },
+      { name: 'Tuna', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'out' },
+      { name: 'Rice', servingSize: 100, unit: 'g', calories: 130, protein: 2.7, carbs: 28.2, fat: 0.3, minServings: 0, maxServings: 5, availability: 'normal' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result?.mealResults[0]?.items || [];
+    const chicken = items.find(i => i.name === 'Chicken')?.servings || 0;
+    const turkey = items.find(i => i.name === 'Turkey')?.servings || 0;
+    const tuna = items.find(i => i.name === 'Tuna')?.servings || 0;
+    const passed = outcome.result && chicken >= 0.49 && turkey > 0.6 && tuna < 0.01;
+
+    console.log(`[AV-3] Availability Hierarchy (Normal > Running Low > Almost Out):`);
+    console.log(`       Chicken (Normal max=0.5): ${chicken.toFixed(2)} serv, Turkey (Running Low): ${turkey.toFixed(2)} serv, Tuna (Almost Out): ${tuna.toFixed(2)} serv`);
+    console.log(`       Status: ${passed ? 'PASSED (Solver picked Running Low over Almost Out when Normal was capped)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-3: Availability Hierarchy', passed });
+  }
+
+  // AV-4: Nutritional accuracy strictly dominates Almost Out penalty
+  {
+    resetSolverState();
+    state.targets = { calories: 500, protein: 50, carbs: 40, fat: 10 };
+    // Only Chicken provides significant protein, but is marked "Almost Out"
+    state.ingredients = [
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'out' },
+      { name: 'Rice', servingSize: 100, unit: 'g', calories: 130, protein: 2.7, carbs: 28.2, fat: 0.3, minServings: 0, maxServings: 5, availability: 'normal' }
+    ];
+
+    const outcome = Optimization.solve();
+    const items = outcome.result?.mealResults[0]?.items || [];
+    const chicken = items.find(i => i.name === 'Chicken')?.servings || 0;
+    const proDev = Math.abs(outcome.result?.deviations?.protein?.absolute || 0);
+    const passed = outcome.result && chicken > 1.2 && proDev < 1.0;
+
+    console.log(`[AV-4] Nutritional Subordination (Almost Out strictly used when needed for macros):`);
+    console.log(`       Chicken (Almost Out): ${chicken.toFixed(2)} serv, Protein Deviation: ${proDev.toFixed(2)}g`);
+    console.log(`       Status: ${passed ? 'PASSED (Nutritional accuracy dominated Almost Out penalty)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-4: Nutritional Dominance', passed });
+  }
+
+  // AV-5: Import/Export, Schema Validation & Backward Compatibility
+  {
+    // 1. Validation of valid availability strings
+    const validPayload = {
+      ingredients: [
+        { name: 'Normal Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, availability: 'normal' },
+        { name: 'Low Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, availability: 'low' },
+        { name: 'Out Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, availability: 'out' },
+        { name: 'Legacy Food No Avail', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2 }
+      ]
+    };
+    const validErrors = ImportExport._validate(validPayload);
+
+    // 2. Validation of invalid availability string
+    const invalidPayload = {
+      ingredients: [
+        { name: 'Bad Avail Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, availability: 'super_rare' }
+      ]
+    };
+    const invalidErrors = ImportExport._validate(invalidPayload);
+
+    // 3. Validation via Validation.validateIngredients
+    state.ingredients = [
+      { name: 'Bad Food', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, availability: 'not_valid' }
+    ];
+    const validationErrors = Validation.validateIngredients();
+
+    const passed = validErrors.length === 0 && invalidErrors.length > 0 && validationErrors.length > 0;
+
+    console.log(`[AV-5] Schema Validation & Backward Compatibility:`);
+    console.log(`       Valid/legacy import check: errors=${validErrors.length}`);
+    console.log(`       Invalid availability import check: errors=${invalidErrors.length} (${invalidErrors[0] || ''})`);
+    console.log(`       Validation.validateIngredients check: errors=${validationErrors.length} (${validationErrors[0] || ''})`);
+    console.log(`       Status: ${passed ? 'PASSED (Schema validation and backward compatibility confirmed)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-5: Validation & Compatibility', passed });
+  }
+
+  // AV-6: Dynamic update immediate effect
+  {
+    resetSolverState();
+    state.ingredients = [
+      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'normal' },
+      { name: 'Turkey', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'normal' },
+      { name: 'Rice', servingSize: 100, unit: 'g', calories: 130, protein: 2.7, carbs: 28.2, fat: 0.3, minServings: 0, maxServings: 5, availability: 'normal' }
+    ];
+
+    // Solve 1: both normal
+    Optimization.solve();
+    const c1 = state.result?.mealResults[0]?.items.find(i => i.name === 'Chicken')?.servings || 0;
+
+    // Mutate Chicken to 'out'
+    state.ingredients[0].availability = 'out';
+    Optimization.solve();
+    const c2 = state.result?.mealResults[0]?.items.find(i => i.name === 'Chicken')?.servings || 0;
+    const t2 = state.result?.mealResults[0]?.items.find(i => i.name === 'Turkey')?.servings || 0;
+
+    const passed = (c1 > 0.5 || state.result?.mealResults[0]?.items.find(i => i.name === 'Turkey')?.servings > 0.5) && c2 < 0.05 && t2 > 0.9;
+    console.log(`[AV-6] Immediate Solver Re-Evaluation:`);
+    console.log(`       Before (Chicken Normal): Chicken=${c1.toFixed(2)} serv`);
+    console.log(`       After (Chicken Almost Out): Chicken=${c2.toFixed(2)} serv, Turkey=${t2.toFixed(2)} serv`);
+    console.log(`       Status: ${passed ? 'PASSED (Changing availability immediately alters next solve)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-6: Immediate Solver Re-Evaluation', passed });
+  }
+
+  const allPassed = results.every(r => r.passed);
+  if (!allPassed) {
+    console.error('ERROR: Some availability tests failed!');
+    process.exitCode = 1;
+  }
+  return results;
 }
 

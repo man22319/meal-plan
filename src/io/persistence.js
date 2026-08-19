@@ -25,24 +25,20 @@ export const Persistence = {
         if (Array.isArray(parsed) && parsed.length > 0) {
           const validated = parsed.map(ing => {
             if (!ing || typeof ing.name !== 'string' || ing.name.trim() === '') return null;
-            if (typeof ing.servingSize !== 'number' || ing.servingSize <= 0) return null;
             if (typeof ing.unit !== 'string' || ing.unit.trim() === '') return null;
-            if (typeof ing.calories !== 'number' || ing.calories < 0) return null;
-            if (typeof ing.protein !== 'number' || ing.protein < 0) return null;
-            if (typeof ing.carbs !== 'number' || ing.carbs < 0) return null;
-            if (typeof ing.fat !== 'number' || ing.fat < 0) return null;
 
             return {
               name: ing.name.trim(),
-              servingSize: ing.servingSize,
+              servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? '' : (typeof ing.servingSize === 'number' && ing.servingSize > 0 ? ing.servingSize : 100),
               unit: ing.unit.trim(),
-              calories: ing.calories,
-              protein: ing.protein,
-              carbs: ing.carbs,
-              fat: ing.fat,
-              minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
-              maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5,
-              quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous'
+              calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? '' : (typeof ing.calories === 'number' && ing.calories >= 0 ? ing.calories : 0),
+              protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? '' : (typeof ing.protein === 'number' && ing.protein >= 0 ? ing.protein : 0),
+              carbs: (ing.carbs === '' || typeof ing.carbs === 'undefined') ? '' : (typeof ing.carbs === 'number' && ing.carbs >= 0 ? ing.carbs : 0),
+              fat: (ing.fat === '' || typeof ing.fat === 'undefined') ? '' : (typeof ing.fat === 'number' && ing.fat >= 0 ? ing.fat : 0),
+              minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? '' : (typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0),
+              maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? '' : (typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5),
+              quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous',
+              availability: (ing.availability === 'low' || ing.availability === 'running_low') ? 'low' : (ing.availability === 'out' || ing.availability === 'almost_out') ? 'out' : 'normal'
             };
           }).filter(Boolean);
 
@@ -92,15 +88,16 @@ export const ImportExport = {
     const data = {
       ingredients: state.ingredients.map(ing => ({
         name: ing.name,
-        servingSize: ing.servingSize,
+        servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
         unit: ing.unit,
-        calories: ing.calories,
-        protein: ing.protein,
-        carbs: ing.carbs,
-        fat: ing.fat,
-        minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
-        maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5,
-        quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous'
+        calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : Number(ing.calories),
+        protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : Number(ing.protein),
+        carbs: (ing.carbs === '' || typeof ing.carbs === 'undefined') ? 0 : Number(ing.carbs),
+        fat: (ing.fat === '' || typeof ing.fat === 'undefined') ? 0 : Number(ing.fat),
+        minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : (typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0),
+        maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : (typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5),
+        quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous',
+        availability: (ing.availability === 'low' || ing.availability === 'running_low') ? 'low' : (ing.availability === 'out' || ing.availability === 'almost_out') ? 'out' : 'normal'
       })),
       mealConstraints: {
         minIngredients: state.mealConstraints?.minIngredients ?? 1,
@@ -145,7 +142,8 @@ export const ImportExport = {
           fat: ing.fat,
           minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
           maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5,
-          quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous'
+          quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous',
+          availability: (ing.availability === 'low' || ing.availability === 'running_low') ? 'low' : (ing.availability === 'out' || ing.availability === 'almost_out') ? 'out' : 'normal'
         }));
 
         if (parsed.mealConstraints && typeof parsed.mealConstraints === 'object') {
@@ -240,6 +238,9 @@ export const ImportExport = {
       }
       if (typeof ing.quantityMode !== 'undefined' && ing.quantityMode !== 'continuous' && ing.quantityMode !== 'discrete') {
         errors.push(`"${label}": quantityMode must be "continuous" or "discrete".`);
+      }
+      if (typeof ing.availability !== 'undefined' && !['normal', 'low', 'running_low', 'out', 'almost_out'].includes(ing.availability)) {
+        errors.push(`"${label}": availability must be "normal", "low", or "out".`);
       }
     });
 

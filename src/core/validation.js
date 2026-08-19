@@ -65,30 +65,43 @@ export const Validation = {
       if (!ing.name || ing.name.trim() === '') {
         errors.push(`Ingredient ${i + 1}: name is empty.`);
       }
-      if (typeof ing.servingSize !== 'number' || isNaN(ing.servingSize) || ing.servingSize <= 0) {
+
+      const servingSize = (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : ing.servingSize;
+      const calories = (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : ing.calories;
+      const protein = (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : ing.protein;
+      const carbs = (ing.carbs === '' || typeof ing.carbs === 'undefined') ? 0 : ing.carbs;
+      const fat = (ing.fat === '' || typeof ing.fat === 'undefined') ? 0 : ing.fat;
+      const minServings = (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : ing.minServings;
+      const maxServings = (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : ing.maxServings;
+
+      if (typeof servingSize !== 'number' || isNaN(servingSize) || servingSize <= 0) {
         errors.push(`"${label}": serving size must be positive.`);
       }
       if (!ing.unit || ing.unit.trim() === '') {
         errors.push(`"${label}": unit is empty.`);
       }
+      const macros = { calories, protein, carbs, fat };
       ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
-        if (typeof ing[k] !== 'number' || isNaN(ing[k])) {
+        if (typeof macros[k] !== 'number' || isNaN(macros[k])) {
           errors.push(`"${label}": ${k} must be a number.`);
-        } else if (ing[k] < 0) {
+        } else if (macros[k] < 0) {
           errors.push(`"${label}": ${k} cannot be negative.`);
         }
       });
-      if (typeof ing.minServings !== 'undefined' && (typeof ing.minServings !== 'number' || isNaN(ing.minServings) || ing.minServings < 0)) {
+      if (typeof minServings !== 'undefined' && (typeof minServings !== 'number' || isNaN(minServings) || minServings < 0)) {
         errors.push(`"${label}": min servings cannot be negative.`);
       }
-      if (typeof ing.maxServings !== 'undefined' && (typeof ing.maxServings !== 'number' || isNaN(ing.maxServings) || ing.maxServings <= 0)) {
+      if (typeof maxServings !== 'undefined' && (typeof maxServings !== 'number' || isNaN(maxServings) || maxServings <= 0)) {
         errors.push(`"${label}": max servings must be positive.`);
       }
-      if (typeof ing.minServings === 'number' && typeof ing.maxServings === 'number' && ing.minServings > ing.maxServings) {
-        errors.push(`"${label}": min servings (${ing.minServings}) cannot exceed max servings (${ing.maxServings}).`);
+      if (typeof minServings === 'number' && typeof maxServings === 'number' && minServings > maxServings) {
+        errors.push(`"${label}": min servings (${minServings}) cannot exceed max servings (${maxServings}).`);
       }
       if (typeof ing.quantityMode !== 'undefined' && ing.quantityMode !== 'continuous' && ing.quantityMode !== 'discrete') {
         errors.push(`"${label}": quantity mode must be "continuous" or "discrete".`);
+      }
+      if (typeof ing.availability !== 'undefined' && !['normal', 'low', 'running_low', 'out', 'almost_out'].includes(ing.availability)) {
+        errors.push(`"${label}": availability must be "normal", "low", or "out".`);
       }
     });
     return errors;

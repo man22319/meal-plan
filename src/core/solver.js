@@ -22,12 +22,24 @@ export const Optimization = {
       return { errors };
     }
 
-    const { targets, meals, ingredients, weights, penalties, mealConstraints } = state;
+    const { targets, meals, weights, penalties, mealConstraints } = state;
+    const ingredients = state.ingredients.map(ing => ({
+      ...ing,
+      servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
+      calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : Number(ing.calories),
+      protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : Number(ing.protein),
+      carbs: (ing.carbs === '' || typeof ing.carbs === 'undefined') ? 0 : Number(ing.carbs),
+      fat: (ing.fat === '' || typeof ing.fat === 'undefined') ? 0 : Number(ing.fat),
+      minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : Number(ing.minServings),
+      maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : Number(ing.maxServings)
+    }));
     const macros = ['calories', 'protein', 'carbs', 'fat'];
     const mw = [weights.calories, weights.protein, weights.carbs, weights.fat];
 
     const simplicityPenalty = (penalties && typeof penalties.simplicity === 'number') ? penalties.simplicity : 0.0005;
     const quantityPenalty = (penalties && typeof penalties.quantity === 'number') ? penalties.quantity : 0.00001;
+    const availabilityLowPenalty = (penalties && typeof penalties.availabilityLow === 'number') ? penalties.availabilityLow : 0.0005;
+    const availabilityOutPenalty = (penalties && typeof penalties.availabilityOut === 'number') ? penalties.availabilityOut : 0.002;
 
     const minIngPerMeal = mealConstraints && typeof mealConstraints.minIngredients === 'number' ? mealConstraints.minIngredients : 0;
     const maxIngPerMeal = mealConstraints && typeof mealConstraints.maxIngredients === 'number' ? mealConstraints.maxIngredients : 0;
@@ -100,14 +112,21 @@ export const Optimization = {
       const minS = typeof ing.minServings === 'number' && ing.minServings > 0 ? ing.minServings : 0;
       const prefS = typeof ing.preferredServings === 'number' && ing.preferredServings > 0 ? ing.preferredServings : 1.0;
 
+      let availPenalty = 0;
+      if (ing.availability === 'low' || ing.availability === 'running_low') {
+        availPenalty = availabilityLowPenalty;
+      } else if (ing.availability === 'out' || ing.availability === 'almost_out') {
+        availPenalty = availabilityOutPenalty;
+      }
+
       meals.forEach((_, j) => {
         const v_x = `x_${i}_${j}`;
         const v_z = `z_${i}_${j}`;
         const v_excess = `excess_${i}_${j}`;
 
-        // Continuous servings variable entry with minute quantity penalty
+        // Continuous servings variable entry with minute quantity penalty & availability penalty
         const xEntry = {
-          cost: quantityPenalty
+          cost: quantityPenalty + availPenalty
         };
 
         // Contribute to daily macros
@@ -133,7 +152,7 @@ export const Optimization = {
           model.binaries[v_z] = 1;
 
           const zEntry = {
-            cost: simplicityPenalty
+            cost: simplicityPenalty + (availPenalty > 0 ? availPenalty * 0.5 : 0)
           };
 
           // Link upper bound: x_ij - maxServings_i * z_ij <= 0
@@ -197,7 +216,17 @@ export const Optimization = {
   },
 
   _extract(raw) {
-    const { meals, ingredients, targets } = state;
+    const { meals, targets } = state;
+    const ingredients = state.ingredients.map(ing => ({
+      ...ing,
+      servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
+      calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : Number(ing.calories),
+      protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : Number(ing.protein),
+      carbs: (ing.carbs === '' || typeof ing.carbs === 'undefined') ? 0 : Number(ing.carbs),
+      fat: (ing.fat === '' || typeof ing.fat === 'undefined') ? 0 : Number(ing.fat),
+      minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : Number(ing.minServings),
+      maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : Number(ing.maxServings)
+    }));
 
     const mealResults = meals.map((meal, j) => {
       const items = [];
@@ -216,7 +245,8 @@ export const Optimization = {
             unit: ing.unit,
             servings: s,
             selected: z > 0.5,
-            quantityMode: ing.quantityMode || 'continuous'
+            quantityMode: ing.quantityMode || 'continuous',
+            availability: ing.availability || 'normal'
           });
           mCal += s * ing.calories;
           mPro += s * ing.protein;
