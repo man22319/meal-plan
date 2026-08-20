@@ -56,86 +56,44 @@ export function getActualRecord(meal, ing, mealIdx, _ingIdx) {
   return null;
 }
 
-export function resolveMealId(mealRef) {
-  if (mealRef && typeof mealRef === 'object') {
-    if (typeof mealRef.id === 'string' && mealRef.id) return mealRef.id;
-    if (typeof mealRef.name === 'string') {
-      const found = state.meals.find(m => m.name === mealRef.name || m.id === mealRef.id);
-      if (found) return ensureId(found, 'meal');
-    }
-  }
-  if (typeof mealRef === 'number' && state.meals[mealRef]) {
-    return ensureId(state.meals[mealRef], 'meal');
-  }
-  if (typeof mealRef === 'string') {
-    const foundMeal = state.meals.find(m => m.id === mealRef || m.name === mealRef);
-    if (foundMeal) return ensureId(foundMeal, 'meal');
-    return mealRef;
-  }
-  return mealRef != null ? String(mealRef) : null;
-}
+export function getEatenItemRecord(meal, ing, mealIdx, _ingIdx) {
+  if (!state.eatenItems || typeof state.eatenItems !== 'object') return null;
+  const mealId = meal?.id;
+  const ingId = ing?.id;
+  const mealName = meal?.name;
+  const ingName = ing?.name;
 
-export function getEatenMealRecord(meal, mealIdx) {
-  if (!state.eatenMeals || typeof state.eatenMeals !== 'object') return null;
-  if (meal?.id && state.eatenMeals[meal.id]) return state.eatenMeals[meal.id];
-  if (typeof mealIdx === 'number' && state.eatenMeals[String(mealIdx)]) {
-    return state.eatenMeals[String(mealIdx)];
+  if (mealId && ingId && state.eatenItems[`${mealId}_${ingId}`]) {
+    return state.eatenItems[`${mealId}_${ingId}`];
   }
-  if (meal?.name && state.eatenMeals[meal.name]) return state.eatenMeals[meal.name];
+  if (ingId && state.eatenItems[`${mealIdx}_${ingId}`]) {
+    return state.eatenItems[`${mealIdx}_${ingId}`];
+  }
+  if (mealId && ingName && state.eatenItems[`${mealId}_${ingName}`]) {
+    return state.eatenItems[`${mealId}_${ingName}`];
+  }
+  if (mealName && ingName && state.eatenItems[`${mealName}_${ingName}`]) {
+    return state.eatenItems[`${mealName}_${ingName}`];
+  }
+  if (ingName && state.eatenItems[`${mealIdx}_${ingName}`]) {
+    return state.eatenItems[`${mealIdx}_${ingName}`];
+  }
   return null;
 }
 
-export function isMealEaten(meal, mealIdx) {
-  return Boolean(getEatenMealRecord(meal, mealIdx));
-}
-
-export function hasAnyEatenMeals() {
-  return Boolean(state.eatenMeals && Object.keys(state.eatenMeals).length > 0);
-}
-
-function snapshotMealItems(mealResult) {
-  return (mealResult.items || []).map(item => ({
-    id: item.id,
-    mealId: item.mealId,
-    mealIdx: item.mealIdx,
-    name: item.name,
-    quantity: item.quantity,
-    displayQuantity: item.displayQuantity ?? item.quantity,
-    plannedQuantity: item.plannedQuantity,
-    actualQuantity: item.actualQuantity ?? null,
-    isActual: Boolean(item.isActual),
-    unit: item.unit,
-    servings: item.servings,
-    servingSize: item.servingSize,
-    selected: item.selected,
-    quantityMode: item.quantityMode,
-    availability: item.availability
-  }));
-}
-
-function computeEatenMacroTotals(ingredients) {
-  const totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
-  state.meals.forEach((meal, j) => {
-    const rec = getEatenMealRecord(meal, j);
-    if (!rec) return;
-    (rec.items || []).forEach(item => {
-      const ing = ingredients.find(i => i.id === item.id || i.name === item.name);
-      if (!ing) return;
-      const servings = typeof item.servings === 'number'
-        ? item.servings
-        : (Number(item.quantity) || 0) / (ing.servingSize || 100);
-      totals.calories += servings * ing.calories;
-      totals.protein += servings * ing.protein;
-      totals.carbs += servings * ing.carbs;
-      totals.fat += servings * ing.fat;
-    });
-  });
-  return totals;
+export function hasAnyEatenItems() {
+  return Boolean(state.eatenItems && Object.keys(state.eatenItems).length > 0);
 }
 
 function findMealResult(mealId) {
   if (!state.result?.mealResults) return null;
   return state.result.mealResults.find(m => m.id === mealId || m.name === mealId) || null;
+}
+
+function findResultItem(mealId, ingId) {
+  const meal = findMealResult(mealId);
+  if (!meal) return null;
+  return meal.items.find(it => it.id === ingId || it.name === ingId) || null;
 }
 
 export const Optimization = {
@@ -146,7 +104,7 @@ export const Optimization = {
   solve({ preserveActuals = true } = {}) {
     const errors = Validation.validateAll();
     if (errors.length > 0) {
-      if (!hasAnyEatenMeals()) {
+      if (!hasAnyEatenItems()) {
         state.result = null;
       }
       return { errors };
@@ -207,40 +165,19 @@ export const Optimization = {
       model.ints = {};
     }
 
-    const eatenFlags = meals.map((meal, j) => isMealEaten(meal, j));
-    const uneatenIdxs = meals.map((_, j) => j).filter(j => !eatenFlags[j]);
-    const eatenTotals = computeEatenMacroTotals(ingredients);
-
-    if (uneatenIdxs.length === 0) {
-      state.result = Optimization._extract({});
-      return { result: state.result };
-    }
-
-    const remainingTargets = {
-      calories: targets.calories - eatenTotals.calories,
-      protein: targets.protein - eatenTotals.protein,
-      carbs: targets.carbs - eatenTotals.carbs,
-      fat: targets.fat - eatenTotals.fat
-    };
-    const uneatenPctSum = uneatenIdxs.reduce((sum, j) => sum + (meals[j].pct || 0), 0);
-
-    // 1. Daily macro constraints on remaining uneaten allocation
+    // 1. Daily macro constraints (with deviation variables dP and dM)
     macros.forEach((m, mi) => {
       const c = `daily_${m}`;
-      model.constraints[c] = { equal: remainingTargets[m] };
+      model.constraints[c] = { equal: targets[m] };
       const coeff = targets[m] > 0 ? mw[mi] / targets[m] : 1.0;
       model.variables[`dP_${m}`] = { cost: coeff, [c]: -1 };
       model.variables[`dM_${m}`] = { cost: coeff, [c]: 1 };
     });
 
-    // 2. Meal calorie allocation among UNEATEN meals only
-    uneatenIdxs.forEach(j => {
-      const meal = meals[j];
-      const remainingCal = remainingTargets.calories;
-      const tgt = uneatenPctSum > 0
-        ? (meal.pct / uneatenPctSum) * remainingCal
-        : remainingCal / uneatenIdxs.length;
-      if (tgt === 0 && remainingCal === 0) return;
+    // 2. Meal calorie allocation constraints (soft target per meal)
+    meals.forEach((meal, j) => {
+      const tgt = (meal.pct / 100) * targets.calories;
+      if (tgt <= 0) return;
       const c = `meal_${j}`;
       model.constraints[c] = { equal: tgt };
       const coeff = targets.calories > 0 ? (weights.mealAllocation / targets.calories) : 0.001;
@@ -248,9 +185,9 @@ export const Optimization = {
       model.variables[`mdM_${j}`] = { cost: coeff, [c]: 1 };
     });
 
-    // 3. Per-meal ingredient count constraints (uneaten meals only)
+    // 3. Per-meal ingredient count constraints (if binaries needed)
     if (needsBinaries) {
-      uneatenIdxs.forEach(j => {
+      meals.forEach((_, j) => {
         if (minIngPerMeal > 0) {
           model.constraints[`meal_ing_min_${j}`] = { min: minIngPerMeal };
         }
@@ -275,18 +212,21 @@ export const Optimization = {
         availPenalty = availabilityOutPenalty;
       }
 
-      uneatenIdxs.forEach(j => {
-        const meal = meals[j];
+      meals.forEach((meal, j) => {
         const v_x = `x_${i}_${j}`;
         const v_z = `z_${i}_${j}`;
         const v_excess = `excess_${i}_${j}`;
 
         const actualRec = getActualRecord(meal, ing, j, i);
-        const isRecorded = Boolean(actualRec && typeof actualRec.actualQuantity === 'number');
+        const eatenRec = getEatenItemRecord(meal, ing, j, i);
+        const lockQty = (actualRec && typeof actualRec.actualQuantity === 'number')
+          ? actualRec.actualQuantity
+          : (eatenRec && typeof eatenRec.quantity === 'number' ? eatenRec.quantity : null);
+        const isRecorded = lockQty !== null;
 
         if (isRecorded) {
           // Recorded actual quantity is an immutable observation
-          const sActual = actualRec.actualQuantity / (ing.servingSize || 100);
+          const sActual = lockQty / (ing.servingSize || 100);
           const xEntry = {
             cost: 0
           };
@@ -400,7 +340,7 @@ export const Optimization = {
     }
 
     if (!raw || !raw.feasible) {
-      return { errors: ['Structural infeasibility: No valid solution satisfies the current constraints (e.g. ingredient serving bounds or meal ingredient limits). EATEN meals were left unchanged. Try adjusting ingredient limits.'] };
+      return { errors: ['Structural infeasibility: No valid solution satisfies the current constraints (e.g. ingredient serving bounds or meal ingredient limits). EATEN ingredients were left unchanged. Try adjusting ingredient limits.'] };
     }
 
     state.result = Optimization._extract(raw);
@@ -430,39 +370,42 @@ export const Optimization = {
     return Optimization.solve({ preserveActuals: false });
   },
 
-  markMealEaten(mealRef) {
-    const mealId = resolveMealId(mealRef);
-    const mealResult = findMealResult(mealId);
-    if (!mealResult) {
-      return { errors: ['No solved meal plan to lock. Press SOLVE first.'] };
+  markIngredientEaten(mealRef, ingRef) {
+    const { mealId, ingId } = resolveMealAndIngIds(mealRef, ingRef);
+    const item = findResultItem(mealId, ingId);
+    if (!item) {
+      return { errors: ['No solved quantity to lock. Press SOLVE first.'] };
     }
-    if (!state.eatenMeals) state.eatenMeals = {};
-    state.eatenMeals[mealId] = { items: snapshotMealItems(mealResult) };
-    mealResult.isEaten = true;
+    if (!state.eatenItems) state.eatenItems = {};
+    state.eatenItems[`${mealId}_${ingId}`] = {
+      quantity: Number(item.quantity),
+      servings: item.servings,
+      plannedQuantity: item.plannedQuantity,
+      actualQuantity: item.actualQuantity ?? null
+    };
+    item.isEaten = true;
     return { result: state.result };
   },
 
-  unmarkMealEaten(mealRef) {
-    const mealId = resolveMealId(mealRef);
-    if (!state.eatenMeals) return { result: state.result };
-    delete state.eatenMeals[mealId];
-    const meal = state.meals.find(m => m.id === mealId || m.name === mealId);
-    if (meal?.name) delete state.eatenMeals[meal.name];
-    const idx = state.meals.findIndex(m => m.id === mealId || m.name === mealId);
-    if (idx >= 0) delete state.eatenMeals[String(idx)];
-    const mealResult = findMealResult(mealId);
-    if (mealResult) mealResult.isEaten = false;
+  unmarkIngredientEaten(mealRef, ingRef) {
+    const { mealId, ingId } = resolveMealAndIngIds(mealRef, ingRef);
+    if (!state.eatenItems) return { result: state.result };
+    delete state.eatenItems[`${mealId}_${ingId}`];
+    const item = findResultItem(mealId, ingId);
+    if (item) item.isEaten = false;
     return { result: state.result };
   },
 
-  toggleMealEaten(mealRef) {
-    const mealId = resolveMealId(mealRef);
+  toggleIngredientEaten(mealRef, ingRef) {
+    const { mealId, ingId } = resolveMealAndIngIds(mealRef, ingRef);
     const meal = state.meals.find(m => m.id === mealId || m.name === mealId);
+    const ing = state.ingredients.find(i => i.id === ingId || i.name === ingId);
     const idx = state.meals.findIndex(m => m.id === mealId || m.name === mealId);
-    if (isMealEaten(meal || { id: mealId }, idx >= 0 ? idx : undefined) || (state.eatenMeals && state.eatenMeals[mealId])) {
-      return Optimization.unmarkMealEaten(mealRef);
+    if (getEatenItemRecord(meal || { id: mealId }, ing || { id: ingId, name: ingId }, idx, 0)
+      || (state.eatenItems && state.eatenItems[`${mealId}_${ingId}`])) {
+      return Optimization.unmarkIngredientEaten(mealRef, ingRef);
     }
-    return Optimization.markMealEaten(mealRef);
+    return Optimization.markIngredientEaten(mealRef, ingRef);
   },
 
   _extract(raw) {
@@ -479,58 +422,29 @@ export const Optimization = {
     }));
 
     const mealResults = meals.map((meal, j) => {
-      const eatenRec = getEatenMealRecord(meal, j);
-      if (eatenRec) {
-        const items = snapshotMealItems({ items: eatenRec.items });
-        let mCal = 0, mPro = 0, mCarb = 0, mFat = 0;
-        items.forEach(item => {
-          const ing = ingredients.find(i => i.id === item.id || i.name === item.name);
-          const servings = typeof item.servings === 'number'
-            ? item.servings
-            : (Number(item.quantity) || 0) / (ing?.servingSize || item.servingSize || 100);
-          item.servings = servings;
-          if (ing) {
-            mCal += servings * ing.calories;
-            mPro += servings * ing.protein;
-            mCarb += servings * ing.carbs;
-            mFat += servings * ing.fat;
-          }
-        });
-        const tgt = (meal.pct / 100) * targets.calories;
-        return {
-          id: meal.id,
-          name: meal.name,
-          pct: meal.pct,
-          items,
-          calories: mCal,
-          protein: mPro,
-          carbs: mCarb,
-          fat: mFat,
-          targetCalories: tgt,
-          calDeviation: mCal - tgt,
-          isEaten: true
-        };
-      }
-
       const items = [];
       let mCal = 0, mPro = 0, mCarb = 0, mFat = 0;
 
       ingredients.forEach((ing, i) => {
         const actualRec = getActualRecord(meal, ing, j, i);
+        const eatenRec = getEatenItemRecord(meal, ing, j, i);
         const isActual = Boolean(actualRec && typeof actualRec.actualQuantity === 'number');
+        const isEaten = Boolean(eatenRec && typeof eatenRec.quantity === 'number');
 
         let s = (raw && raw[`x_${i}_${j}`]) || 0;
         const z = (raw && raw[`z_${i}_${j}`]) || 0;
 
-        if (isActual) {
-          const actualQuantity = Number(actualRec.actualQuantity);
-          const plannedQuantity = typeof actualRec.plannedQuantityAtRecord === 'number'
+        if (isActual || isEaten) {
+          const lockedQuantity = isActual ? Number(actualRec.actualQuantity) : Number(eatenRec.quantity);
+          const plannedQuantity = isActual && typeof actualRec.plannedQuantityAtRecord === 'number'
             ? actualRec.plannedQuantityAtRecord
-            : Math.round((s * ing.servingSize) * 100) / 100;
-          const displayQuantity = actualQuantity;
+            : (typeof eatenRec?.plannedQuantity === 'number'
+              ? eatenRec.plannedQuantity
+              : Math.round((s * ing.servingSize) * 100) / 100);
+          const displayQuantity = lockedQuantity;
           const servings = displayQuantity / (ing.servingSize || 100);
 
-          if (servings > 0.001 || z > 0.5 || actualQuantity > 0) {
+          if (servings > 0.001 || z > 0.5 || lockedQuantity > 0) {
             items.push({
               id: ing.id,
               mealId: meal.id,
@@ -539,8 +453,9 @@ export const Optimization = {
               quantity: displayQuantity,
               displayQuantity,
               plannedQuantity,
-              actualQuantity,
-              isActual: true,
+              actualQuantity: isActual ? Number(actualRec.actualQuantity) : null,
+              isActual,
+              isEaten,
               unit: ing.unit,
               servings,
               servingSize: ing.servingSize,
@@ -572,6 +487,7 @@ export const Optimization = {
               plannedQuantity,
               actualQuantity: null,
               isActual: false,
+              isEaten: false,
               unit: ing.unit,
               servings: s,
               servingSize: ing.servingSize,
@@ -599,8 +515,7 @@ export const Optimization = {
         carbs: mCarb,
         fat: mFat,
         targetCalories: tgt,
-        calDeviation: mCal - tgt,
-        isEaten: false
+        calDeviation: mCal - tgt
       };
     });
 

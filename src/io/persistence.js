@@ -29,7 +29,7 @@ export const Persistence = {
         localStorage.setItem(RESULT_KEY, JSON.stringify({
           ...state.result,
           actuals: state.actuals || {},
-          eatenMeals: state.eatenMeals || {}
+          eatenItems: state.eatenItems || {}
         }));
       } else {
         localStorage.removeItem(RESULT_KEY);
@@ -126,8 +126,8 @@ export const Persistence = {
           if (parsedResult.actuals && typeof parsedResult.actuals === 'object') {
             state.actuals = parsedResult.actuals;
           }
-          if (parsedResult.eatenMeals && typeof parsedResult.eatenMeals === 'object') {
-            state.eatenMeals = parsedResult.eatenMeals;
+          if (parsedResult.eatenItems && typeof parsedResult.eatenItems === 'object') {
+            state.eatenItems = parsedResult.eatenItems;
           }
         }
       }
@@ -152,7 +152,7 @@ export const Persistence = {
     state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
     state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
     state.actuals = {};
-    state.eatenMeals = {};
+    state.eatenItems = {};
     state.result = null;
   }
 };
@@ -239,7 +239,7 @@ export const ImportExport = {
           });
         }
 
-        state.eatenMeals = {};
+        state.eatenItems = {};
         state.result = null;
         Persistence.save();
         if (onSuccess) onSuccess();

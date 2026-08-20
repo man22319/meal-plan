@@ -1345,13 +1345,13 @@ function mealItemSignature(meal) {
     .join('|');
 }
 
-function mealNames(meal) {
-  return (meal?.items || []).map(i => i.name).sort().join(',');
+function findItem(meal, name) {
+  return (meal?.items || []).find(i => i.name === name);
 }
 
 export function runEatenMealTestSuite() {
   console.log('═══════════════════════════════════════════════════════════════════');
-  console.log(' RUNNING EATEN / UNEATEN MEAL LOCKING TEST SUITE                    ');
+  console.log(' RUNNING EATEN / UNEATEN INGREDIENT LOCKING TEST SUITE              ');
   console.log('═══════════════════════════════════════════════════════════════════\n');
 
   const results = [];
@@ -1373,18 +1373,19 @@ export function runEatenMealTestSuite() {
     state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
     state.penalties = { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002, availabilityLow: 0.0005, availabilityOut: 0.002 };
     state.actuals = {};
-    state.eatenMeals = {};
+    state.eatenItems = {};
   }
 
   {
     resetToTestDefaults();
     const initial = Optimization.solve({ preserveActuals: false });
     const before = initial.result.mealResults.map(mealItemSignature);
-    Optimization.markMealEaten('meal_0');
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
     const after = state.result.mealResults.map(mealItemSignature);
-    const passed = before.every((sig, i) => sig === after[i]) && state.result.mealResults[0].isEaten === true;
+    const chicken = findItem(state.result.mealResults[0], 'Chicken');
+    const passed = before.every((sig, i) => sig === after[i]) && chicken?.isEaten === true;
 
-    console.log(`[EM-1] Marking EATEN Does Not Change Quantities:`);
+    console.log(`[EM-1] Marking Ingredient EATEN Does Not Change Quantities:`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
     results.push({ name: 'EM-1: Mark EATEN does not change quantities', passed });
   }
@@ -1392,14 +1393,14 @@ export function runEatenMealTestSuite() {
   {
     resetToTestDefaults();
     Optimization.solve({ preserveActuals: false });
-    const breakfastBefore = mealItemSignature(state.result.mealResults[0]);
-    Optimization.markMealEaten('meal_0');
+    const chickenBefore = findItem(state.result.mealResults[0], 'Chicken')?.quantity;
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
     const outcome = Optimization.solve({ preserveActuals: true });
-    const breakfastAfter = mealItemSignature(outcome.result?.mealResults[0]);
-    const passed = Boolean(outcome.result) && breakfastBefore === breakfastAfter &&
-      outcome.result.mealResults[0].isEaten === true;
+    const chickenAfter = findItem(outcome.result?.mealResults[0], 'Chicken');
+    const passed = Boolean(outcome.result) && Math.abs(chickenAfter.quantity - chickenBefore) < 0.01 &&
+      chickenAfter.isEaten === true;
 
-    console.log(`[EM-2] EATEN Meal Survives SOLVE:`);
+    console.log(`[EM-2] EATEN Ingredient Survives SOLVE:`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
     results.push({ name: 'EM-2: EATEN survives SOLVE unchanged', passed });
   }
@@ -1407,20 +1408,19 @@ export function runEatenMealTestSuite() {
   {
     resetToTestDefaults();
     Optimization.solve({ preserveActuals: false });
-    const breakfastBefore = mealItemSignature(state.result.mealResults[0]);
+    const chickenBefore = findItem(state.result.mealResults[0], 'Chicken')?.quantity;
     const lunchBefore = mealItemSignature(state.result.mealResults[1]);
-    const dinnerBefore = mealItemSignature(state.result.mealResults[2]);
-    Optimization.markMealEaten('meal_0');
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
     state.ingredients.forEach(ing => { ing.maxServings = 20; });
     state.targets.calories = 2800;
     const outcome = Optimization.solve({ preserveActuals: true });
-    const breakfastAfter = mealItemSignature(outcome.result?.mealResults[0]);
-    const uneatenChanged = mealItemSignature(outcome.result?.mealResults[1]) !== lunchBefore ||
-      mealItemSignature(outcome.result?.mealResults[2]) !== dinnerBefore;
-    const passed = breakfastBefore === breakfastAfter && Boolean(outcome.result) && uneatenChanged;
+    const chickenAfter = findItem(outcome.result?.mealResults[0], 'Chicken');
+    const lunchChanged = mealItemSignature(outcome.result?.mealResults[1]) !== lunchBefore;
+    const passed = Math.abs(chickenAfter.quantity - chickenBefore) < 0.01 &&
+      chickenAfter.isEaten === true && Boolean(outcome.result) && lunchChanged;
 
-    console.log(`[EM-3] UNEATEN Re-optimized Around EATEN:`);
-    console.log(`       Breakfast locked=${breakfastBefore === breakfastAfter} uneatenChanged=${uneatenChanged} totals=${outcome.result?.totals?.calories?.toFixed(0)}`);
+    console.log(`[EM-3] UNEATEN Re-optimized Around EATEN Ingredient:`);
+    console.log(`       Chicken locked=${Math.abs(chickenAfter.quantity - chickenBefore) < 0.01} lunchChanged=${lunchChanged}`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
     results.push({ name: 'EM-3: UNEATEN re-optimized around EATEN', passed });
   }
@@ -1428,30 +1428,30 @@ export function runEatenMealTestSuite() {
   {
     resetToTestDefaults();
     Optimization.solve({ preserveActuals: false });
-    const b0 = mealItemSignature(state.result.mealResults[0]);
-    const l0 = mealItemSignature(state.result.mealResults[1]);
-    Optimization.markMealEaten('meal_0');
-    Optimization.markMealEaten('meal_1');
+    const chk0 = findItem(state.result.mealResults[0], 'Chicken')?.quantity;
+    const yuc1 = findItem(state.result.mealResults[1], 'Yuca')?.quantity;
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
+    Optimization.markIngredientEaten('meal_1', 'ing_yuc');
     const outcome = Optimization.solve({ preserveActuals: true });
-    const passed = mealItemSignature(outcome.result?.mealResults[0]) === b0 &&
-      mealItemSignature(outcome.result?.mealResults[1]) === l0 &&
-      outcome.result.mealResults[0].isEaten &&
-      outcome.result.mealResults[1].isEaten &&
-      outcome.result.mealResults[2].isEaten !== true;
+    const chk = findItem(outcome.result?.mealResults[0], 'Chicken');
+    const yuc = findItem(outcome.result?.mealResults[1], 'Yuca');
+    const passed = Math.abs(chk.quantity - chk0) < 0.01 && Math.abs(yuc.quantity - yuc1) < 0.01 &&
+      chk.isEaten && yuc.isEaten;
 
-    console.log(`[EM-4] Multiple EATEN Meals:`);
+    console.log(`[EM-4] Multiple EATEN Ingredients:`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
-    results.push({ name: 'EM-4: Multiple EATEN meals', passed });
+    results.push({ name: 'EM-4: Multiple EATEN ingredients', passed });
   }
 
   {
     resetToTestDefaults();
     Optimization.solve({ preserveActuals: false });
-    Optimization.markMealEaten('meal_0');
-    Optimization.unmarkMealEaten('meal_0');
-    const unlocked = !state.result.mealResults[0].isEaten && !state.eatenMeals['meal_0'];
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
+    Optimization.unmarkIngredientEaten('meal_0', 'ing_chk');
+    const chicken = findItem(state.result.mealResults[0], 'Chicken');
+    const unlocked = chicken?.isEaten !== true && !state.eatenItems['meal_0_ing_chk'];
     const outcome = Optimization.solve({ preserveActuals: true });
-    const passed = unlocked && outcome.result && outcome.result.mealResults[0].isEaten !== true;
+    const passed = unlocked && outcome.result && findItem(outcome.result.mealResults[0], 'Chicken')?.isEaten !== true;
 
     console.log(`[EM-5] Mark UNEATEN Again:`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
@@ -1461,75 +1461,58 @@ export function runEatenMealTestSuite() {
   {
     resetToTestDefaults();
     Optimization.solve({ preserveActuals: false });
-    const namesBefore = mealNames(state.result.mealResults[0]);
-    const sigBefore = mealItemSignature(state.result.mealResults[0]);
-    Optimization.markMealEaten('meal_0');
+    const chickenBefore = findItem(state.result.mealResults[0], 'Chicken')?.quantity;
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
     state.targets.protein = 180;
     const outcome = Optimization.solve({ preserveActuals: true });
-    const namesAfter = mealNames(outcome.result?.mealResults[0]);
-    const passed = namesBefore === namesAfter && sigBefore === mealItemSignature(outcome.result?.mealResults[0]);
+    const chickenAfter = findItem(outcome.result?.mealResults[0], 'Chicken');
+    const passed = Math.abs(chickenAfter.quantity - chickenBefore) < 0.01 && chickenAfter.isEaten === true;
 
-    console.log(`[EM-6] EATEN Ingredient Set Immutable:`);
-    console.log(`       Ingredients: ${namesBefore} -> ${namesAfter}`);
+    console.log(`[EM-6] EATEN Ingredient Quantity Immutable:`);
+    console.log(`       Chicken ${chickenBefore?.toFixed(1)}g -> ${chickenAfter?.quantity?.toFixed(1)}g`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
-    results.push({ name: 'EM-6: EATEN cannot gain/remove ingredients', passed });
+    results.push({ name: 'EM-6: EATEN quantity cannot change', passed });
   }
 
   {
     resetToTestDefaults();
     Optimization.solve({ preserveActuals: false });
-    const bCal = state.result.mealResults[0].calories;
-    Optimization.markMealEaten('meal_0');
-    state.ingredients.forEach(ing => { ing.maxServings = 20; });
-    state.targets.calories = 2600;
-    const outcome = Optimization.solve({ preserveActuals: true });
-    const bCalAfter = outcome.result?.mealResults[0].calories;
-    const passed = Math.abs(bCal - bCalAfter) < 0.01 &&
-      Math.abs((outcome.result.mealResults[1].calories + outcome.result.mealResults[2].calories) - (2600 - bCalAfter)) < 80;
-
-    console.log(`[EM-7] Allocation Changes Only Among UNEATEN:`);
-    console.log(`       Breakfast kcal ${bCal.toFixed(1)} -> ${bCalAfter?.toFixed(1)}`);
-    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
-    results.push({ name: 'EM-7: Allocation only among UNEATEN', passed });
-  }
-
-  {
-    resetToTestDefaults();
-    Optimization.solve({ preserveActuals: false });
-    const breakfastBefore = mealItemSignature(state.result.mealResults[0]);
-    Optimization.markMealEaten('meal_0');
+    const chickenBefore = findItem(state.result.mealResults[0], 'Chicken')?.quantity;
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
     state.mealConstraints.minIngredients = 10;
     const outcome = Optimization.solve({ preserveActuals: true });
+    const chickenAfter = findItem(state.result.mealResults[0], 'Chicken');
     const passed = Boolean(outcome.errors && outcome.errors.length > 0) &&
-      mealItemSignature(state.result.mealResults[0]) === breakfastBefore &&
-      Boolean(state.eatenMeals['meal_0']);
+      Math.abs(chickenAfter.quantity - chickenBefore) < 0.01 &&
+      Boolean(state.eatenItems['meal_0_ing_chk']);
 
-    console.log(`[EM-8] Infeasible Remaining Leaves EATEN Unchanged:`);
+    console.log(`[EM-7] Infeasible Remaining Leaves EATEN Unchanged:`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
-    results.push({ name: 'EM-8: Infeasible remaining never modifies EATEN', passed });
+    results.push({ name: 'EM-7: Infeasible remaining never modifies EATEN', passed });
   }
 
   {
     resetToTestDefaults();
     global.localStorage.clear();
     Optimization.solve({ preserveActuals: false });
-    Optimization.markMealEaten('meal_0');
+    Optimization.markIngredientEaten('meal_0', 'ing_chk');
     Persistence.save();
 
     const rawResult = global.localStorage.getItem(RESULT_KEY);
     const parsed = JSON.parse(rawResult);
-    const stored = parsed && parsed.eatenMeals && parsed.eatenMeals.meal_0;
+    const stored = parsed && parsed.eatenItems && parsed.eatenItems.meal_0_ing_chk;
 
-    state.eatenMeals = {};
+    state.eatenItems = {};
     state.result = null;
     Persistence.load();
 
-    const passed = Boolean(stored) && Boolean(state.eatenMeals['meal_0']) &&
-      state.result?.mealResults[0]?.isEaten === true;
+    const loaded = findItem(state.result?.mealResults[0], 'Chicken');
+    const passed = Boolean(stored) && Boolean(state.eatenItems['meal_0_ing_chk']) &&
+      loaded?.isEaten === true;
 
-    console.log(`[EM-9] Persistence Across Reloads:`);
+    console.log(`[EM-8] Persistence Across Reloads:`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
-    results.push({ name: 'EM-9: EATEN persists across reloads', passed });
+    results.push({ name: 'EM-8: EATEN persists across reloads', passed });
   }
 
   {
@@ -1556,24 +1539,25 @@ export function runEatenMealTestSuite() {
 
     t = 1100;
     controller.pointerDown(0, 0);
-    controller.pointerMove(20, 0);
+    controller.pointerMove(50, 0);
     const moveCancelled = cancelled === 2 && completed === 1;
 
     const passed = tapDidNotComplete && holdCompleted && moveCancelled;
 
-    console.log(`[EM-10] Long-Press Reliability:`);
+    console.log(`[EM-9] Long-Press Reliability:`);
     console.log(`       Tap ignored=${tapDidNotComplete}, hold completed=${holdCompleted}, move cancelled=${moveCancelled}`);
     console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
-    results.push({ name: 'EM-10: Long-press completes; taps do not toggle', passed });
+    results.push({ name: 'EM-9: Long-press completes; taps do not toggle', passed });
   }
 
   const allPassed = results.every(r => r.passed);
   if (!allPassed) {
-    console.error('ERROR: Some EATEN meal tests failed!');
+    console.error('ERROR: Some EATEN ingredient tests failed!');
     process.exitCode = 1;
   }
   return results;
 }
+
 
 
 

@@ -4,7 +4,7 @@
 
 import { state } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
-import { Optimization, isMealEaten } from '../core/solver.js';
+import { Optimization } from '../core/solver.js';
 import { bindPressAndHold } from './pressHold.js';
 
 const EPSILON = 0.001;
@@ -506,37 +506,16 @@ export const UI = {
       cardsEl.innerHTML = r.mealResults.map((meal, mealIdx) => {
         const itemsHTML = meal.items.length > 0
           ? meal.items.map(item => {
-              if (item.isActual) {
-                return `
-                  <div class="result-ingredient-row is-actual"
-                       role="button"
-                       tabindex="0"
-                       data-meal-id="${escAttr(item.mealId || meal.id || mealIdx)}"
-                       data-ing-id="${escAttr(item.id || item.name)}"
-                       data-meal-name="${escAttr(meal.name)}"
-                       data-ing-name="${escAttr(item.name)}"
-                       data-unit="${escAttr(item.unit)}"
-                       data-planned="${item.plannedQuantity}"
-                       data-actual="${item.actualQuantity}"
-                       data-is-actual="true"
-                       aria-label="Edit actual portion for ${escAttr(item.name)} in ${escAttr(meal.name)}">
-                    <div class="result-ingredient-left">
-                      <span class="result-ingredient-name">${esc(item.name)}</span>
-                      <span class="result-planned-sub">planned ${Math.round(item.plannedQuantity)} ${esc(item.unit)}</span>
-                    </div>
-                    <div class="result-ingredient-right">
-                      <div class="result-qty-line">
-                        <span class="result-ingredient-qty">${Math.round(item.actualQuantity)} ${esc(item.unit)}</span>
-                        <span class="actual-badge">ACTUAL</span>
-                      </div>
-                      <span class="result-servings">(${item.servings.toFixed(2)} serv)</span>
-                    </div>
-                  </div>
-                `;
-              }
+              const isEaten = Boolean(item.isEaten);
+              const isActual = Boolean(item.isActual);
+              const qty = isActual ? item.actualQuantity : item.quantity;
+              const badges = [
+                isEaten ? '<span class="eaten-badge">EATEN</span>' : '',
+                isActual && !isEaten ? '<span class="actual-badge">ACTUAL</span>' : ''
+              ].join('');
 
               return `
-                <div class="result-ingredient-row"
+                <div class="result-ingredient-row ${isActual ? 'is-actual' : ''} ${isEaten ? 'is-eaten' : ''}"
                      role="button"
                      tabindex="0"
                      data-meal-id="${escAttr(item.mealId || meal.id || mealIdx)}"
@@ -545,15 +524,24 @@ export const UI = {
                      data-ing-name="${escAttr(item.name)}"
                      data-unit="${escAttr(item.unit)}"
                      data-planned="${item.plannedQuantity}"
-                     data-actual=""
-                     data-is-actual="false"
-                     aria-label="Record actual portion for ${escAttr(item.name)} in ${escAttr(meal.name)}">
+                     data-actual="${isActual ? item.actualQuantity : ''}"
+                     data-is-actual="${isActual ? 'true' : 'false'}"
+                     data-is-eaten="${isEaten ? 'true' : 'false'}"
+                     aria-label="${isEaten ? 'Eaten' : 'Hold to mark eaten'}: ${escAttr(item.name)} in ${escAttr(meal.name)}">
+                  <div class="hold-progress" aria-hidden="true">
+                    <svg class="hold-progress-svg" preserveAspectRatio="none">
+                      <path class="hold-progress-track" fill="none" vector-effect="non-scaling-stroke" />
+                      <path class="hold-progress-value" fill="none" vector-effect="non-scaling-stroke" />
+                    </svg>
+                  </div>
                   <div class="result-ingredient-left">
                     <span class="result-ingredient-name">${esc(item.name)}</span>
+                    ${isActual ? `<span class="result-planned-sub">planned ${Math.round(item.plannedQuantity)} ${esc(item.unit)}</span>` : ''}
                   </div>
                   <div class="result-ingredient-right">
                     <div class="result-qty-line">
-                      <span class="result-ingredient-qty">${Math.round(item.quantity)} ${esc(item.unit)}</span>
+                      <span class="result-ingredient-qty">${Math.round(qty)} ${esc(item.unit)}</span>
+                      ${badges}
                     </div>
                     <span class="result-servings">(${item.servings.toFixed(2)} serv)</span>
                   </div>
@@ -563,22 +551,10 @@ export const UI = {
           : '<div class="result-no-items">No ingredients assigned</div>';
 
         return `
-          <div class="result-card ${isMealEaten(meal, mealIdx) ? 'is-eaten' : ''}"
-               data-meal-id="${escAttr(meal.id || mealIdx)}"
-               data-meal-idx="${mealIdx}"
-               aria-label="${escAttr(meal.name)}${isMealEaten(meal, mealIdx) ? ', eaten. Hold to mark uneaten' : '. Hold to mark eaten'}">
-            <div class="hold-progress" aria-hidden="true">
-              <svg viewBox="0 0 36 36" class="hold-progress-svg">
-                <circle class="hold-progress-track" cx="18" cy="18" r="15.5" fill="none" />
-                <circle class="hold-progress-value" cx="18" cy="18" r="15.5" fill="none" />
-              </svg>
-            </div>
+          <div class="result-card" data-meal-id="${escAttr(meal.id || mealIdx)}" data-meal-idx="${mealIdx}">
             <div class="result-card-header">
               <span class="result-meal-name">${esc(meal.name)}</span>
-              <span class="result-card-header-right">
-                ${isMealEaten(meal, mealIdx) ? '<span class="eaten-badge">EATEN</span>' : ''}
-                <span class="result-meal-pct">${meal.pct}%</span>
-              </span>
+              <span class="result-meal-pct">${meal.pct}%</span>
             </div>
             <div class="result-meal-calories">
               <span class="result-cal-actual">${Math.round(meal.calories)}</span>
@@ -607,12 +583,10 @@ export const UI = {
         `;
       }).join('');
 
-      cardsEl.querySelectorAll('.result-card').forEach(card => {
-        bindPressAndHold(card, {
-          shouldIgnore: (e) => Boolean(e.target.closest('.result-ingredient-row')),
+      cardsEl.querySelectorAll('.result-ingredient-row').forEach(row => {
+        bindPressAndHold(row, {
           onComplete: () => {
-            const mealId = card.dataset.mealId;
-            const outcome = Optimization.toggleMealEaten(mealId);
+            const outcome = Optimization.toggleIngredientEaten(row.dataset.mealId, row.dataset.ingId);
             if (outcome.errors && outcome.errors.length > 0) {
               UI.showErrors(outcome.errors);
               return;
@@ -621,10 +595,7 @@ export const UI = {
             UI.renderResults({ scroll: false });
           }
         });
-      });
 
-      cardsEl.querySelectorAll('.result-ingredient-row').forEach(row => {
-        if (row.closest('.result-card.is-eaten')) return;
         const handleOpen = () => {
           const mealId = row.dataset.mealId;
           const ingId = row.dataset.ingId;
@@ -647,7 +618,14 @@ export const UI = {
           });
         };
 
-        row.addEventListener('click', handleOpen);
+        row.addEventListener('click', (e) => {
+          if (row.dataset.holdConsumed === 'true') {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          handleOpen();
+        });
         row.addEventListener('keydown', (e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();

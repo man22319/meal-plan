@@ -98,9 +98,12 @@ function setupEventListeners() {
   document.getElementById('meal-count-dec')?.addEventListener('click', () => {
     if (state.meals.length > 1) {
       const removed = state.meals.pop();
-      if (removed?.id && state.eatenMeals) {
-        delete state.eatenMeals[removed.id];
-        if (removed.name) delete state.eatenMeals[removed.name];
+      if (removed?.id && state.eatenItems) {
+        Object.keys(state.eatenItems).forEach(key => {
+          if (key.startsWith(`${removed.id}_`) || (removed.name && key.startsWith(`${removed.name}_`))) {
+            delete state.eatenItems[key];
+          }
+        });
       }
       Persistence.save();
       UI.renderMeals();
