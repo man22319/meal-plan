@@ -31,6 +31,7 @@ import { Optimization } from '../src/core/solver.js';
 import { state, STORAGE_KEY, SETTINGS_KEY, TARGETS_KEY, MEALS_KEY, RESULT_KEY, DEFAULT_TARGETS, DEFAULT_MEALS } from '../src/core/state.js';
 import { Validation } from '../src/core/validation.js';
 import { Persistence, ImportExport } from '../src/io/persistence.js';
+import { createPressHoldController } from '../src/ui/pressHold.js';
 
 // Base nutritional target
 export const DAILY_TARGET = {
@@ -732,6 +733,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Run Actual Portion Recording & Re-optimization Test Suite
   runActualPortionTestSuite();
 
+  // Run EATEN / UNEATEN meal locking test suite
+  runEatenMealTestSuite();
+
   console.log('\n');
   const sim = runMealSplitSimulations();
 
@@ -1333,6 +1337,244 @@ export function runActualPortionTestSuite() {
   }
   return results;
 }
+
+function mealItemSignature(meal) {
+  return (meal?.items || [])
+    .map(i => `${i.name}:${Number(i.quantity).toFixed(3)}`)
+    .sort()
+    .join('|');
+}
+
+function mealNames(meal) {
+  return (meal?.items || []).map(i => i.name).sort().join(',');
+}
+
+export function runEatenMealTestSuite() {
+  console.log('═══════════════════════════════════════════════════════════════════');
+  console.log(' RUNNING EATEN / UNEATEN MEAL LOCKING TEST SUITE                    ');
+  console.log('═══════════════════════════════════════════════════════════════════\n');
+
+  const results = [];
+
+  function resetToTestDefaults() {
+    Persistence.resetToDefaults();
+    state.targets = { calories: 2335, protein: 151, carbs: 291, fat: 62 };
+    state.meals = [
+      { id: 'meal_0', name: 'Breakfast', pct: 40 },
+      { id: 'meal_1', name: 'Lunch', pct: 20 },
+      { id: 'meal_2', name: 'Dinner', pct: 40 }
+    ];
+    state.ingredients = [
+      { id: 'ing_chk', name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, quantityMode: 'continuous', availability: 'normal' },
+      { id: 'ing_yuc', name: 'Yuca', servingSize: 103, unit: 'g', calories: 180, protein: 3, carbs: 42, fat: 0, minServings: 0, maxServings: 5, quantityMode: 'continuous', availability: 'normal' },
+      { id: 'ing_mlk', name: 'Whole Milk', servingSize: 240, unit: 'mL', calories: 150, protein: 8, carbs: 12, fat: 8, minServings: 0, maxServings: 2, quantityMode: 'continuous', availability: 'normal' }
+    ];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.penalties = { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002, availabilityLow: 0.0005, availabilityOut: 0.002 };
+    state.actuals = {};
+    state.eatenMeals = {};
+  }
+
+  {
+    resetToTestDefaults();
+    const initial = Optimization.solve({ preserveActuals: false });
+    const before = initial.result.mealResults.map(mealItemSignature);
+    Optimization.markMealEaten('meal_0');
+    const after = state.result.mealResults.map(mealItemSignature);
+    const passed = before.every((sig, i) => sig === after[i]) && state.result.mealResults[0].isEaten === true;
+
+    console.log(`[EM-1] Marking EATEN Does Not Change Quantities:`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-1: Mark EATEN does not change quantities', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    const breakfastBefore = mealItemSignature(state.result.mealResults[0]);
+    Optimization.markMealEaten('meal_0');
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const breakfastAfter = mealItemSignature(outcome.result?.mealResults[0]);
+    const passed = Boolean(outcome.result) && breakfastBefore === breakfastAfter &&
+      outcome.result.mealResults[0].isEaten === true;
+
+    console.log(`[EM-2] EATEN Meal Survives SOLVE:`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-2: EATEN survives SOLVE unchanged', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    const breakfastBefore = mealItemSignature(state.result.mealResults[0]);
+    const lunchBefore = mealItemSignature(state.result.mealResults[1]);
+    const dinnerBefore = mealItemSignature(state.result.mealResults[2]);
+    Optimization.markMealEaten('meal_0');
+    state.ingredients.forEach(ing => { ing.maxServings = 20; });
+    state.targets.calories = 2800;
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const breakfastAfter = mealItemSignature(outcome.result?.mealResults[0]);
+    const uneatenChanged = mealItemSignature(outcome.result?.mealResults[1]) !== lunchBefore ||
+      mealItemSignature(outcome.result?.mealResults[2]) !== dinnerBefore;
+    const passed = breakfastBefore === breakfastAfter && Boolean(outcome.result) && uneatenChanged;
+
+    console.log(`[EM-3] UNEATEN Re-optimized Around EATEN:`);
+    console.log(`       Breakfast locked=${breakfastBefore === breakfastAfter} uneatenChanged=${uneatenChanged} totals=${outcome.result?.totals?.calories?.toFixed(0)}`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-3: UNEATEN re-optimized around EATEN', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    const b0 = mealItemSignature(state.result.mealResults[0]);
+    const l0 = mealItemSignature(state.result.mealResults[1]);
+    Optimization.markMealEaten('meal_0');
+    Optimization.markMealEaten('meal_1');
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const passed = mealItemSignature(outcome.result?.mealResults[0]) === b0 &&
+      mealItemSignature(outcome.result?.mealResults[1]) === l0 &&
+      outcome.result.mealResults[0].isEaten &&
+      outcome.result.mealResults[1].isEaten &&
+      outcome.result.mealResults[2].isEaten !== true;
+
+    console.log(`[EM-4] Multiple EATEN Meals:`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-4: Multiple EATEN meals', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    Optimization.markMealEaten('meal_0');
+    Optimization.unmarkMealEaten('meal_0');
+    const unlocked = !state.result.mealResults[0].isEaten && !state.eatenMeals['meal_0'];
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const passed = unlocked && outcome.result && outcome.result.mealResults[0].isEaten !== true;
+
+    console.log(`[EM-5] Mark UNEATEN Again:`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-5: EATEN can be marked UNEATEN', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    const namesBefore = mealNames(state.result.mealResults[0]);
+    const sigBefore = mealItemSignature(state.result.mealResults[0]);
+    Optimization.markMealEaten('meal_0');
+    state.targets.protein = 180;
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const namesAfter = mealNames(outcome.result?.mealResults[0]);
+    const passed = namesBefore === namesAfter && sigBefore === mealItemSignature(outcome.result?.mealResults[0]);
+
+    console.log(`[EM-6] EATEN Ingredient Set Immutable:`);
+    console.log(`       Ingredients: ${namesBefore} -> ${namesAfter}`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-6: EATEN cannot gain/remove ingredients', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    const bCal = state.result.mealResults[0].calories;
+    Optimization.markMealEaten('meal_0');
+    state.ingredients.forEach(ing => { ing.maxServings = 20; });
+    state.targets.calories = 2600;
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const bCalAfter = outcome.result?.mealResults[0].calories;
+    const passed = Math.abs(bCal - bCalAfter) < 0.01 &&
+      Math.abs((outcome.result.mealResults[1].calories + outcome.result.mealResults[2].calories) - (2600 - bCalAfter)) < 80;
+
+    console.log(`[EM-7] Allocation Changes Only Among UNEATEN:`);
+    console.log(`       Breakfast kcal ${bCal.toFixed(1)} -> ${bCalAfter?.toFixed(1)}`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-7: Allocation only among UNEATEN', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    Optimization.solve({ preserveActuals: false });
+    const breakfastBefore = mealItemSignature(state.result.mealResults[0]);
+    Optimization.markMealEaten('meal_0');
+    state.mealConstraints.minIngredients = 10;
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const passed = Boolean(outcome.errors && outcome.errors.length > 0) &&
+      mealItemSignature(state.result.mealResults[0]) === breakfastBefore &&
+      Boolean(state.eatenMeals['meal_0']);
+
+    console.log(`[EM-8] Infeasible Remaining Leaves EATEN Unchanged:`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-8: Infeasible remaining never modifies EATEN', passed });
+  }
+
+  {
+    resetToTestDefaults();
+    global.localStorage.clear();
+    Optimization.solve({ preserveActuals: false });
+    Optimization.markMealEaten('meal_0');
+    Persistence.save();
+
+    const rawResult = global.localStorage.getItem(RESULT_KEY);
+    const parsed = JSON.parse(rawResult);
+    const stored = parsed && parsed.eatenMeals && parsed.eatenMeals.meal_0;
+
+    state.eatenMeals = {};
+    state.result = null;
+    Persistence.load();
+
+    const passed = Boolean(stored) && Boolean(state.eatenMeals['meal_0']) &&
+      state.result?.mealResults[0]?.isEaten === true;
+
+    console.log(`[EM-9] Persistence Across Reloads:`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-9: EATEN persists across reloads', passed });
+  }
+
+  {
+    let t = 0;
+    let completed = 0;
+    let cancelled = 0;
+    const controller = createPressHoldController({
+      duration: 800,
+      now: () => t,
+      onComplete: () => { completed += 1; },
+      onCancel: () => { cancelled += 1; }
+    });
+
+    controller.pointerDown(0, 0);
+    t = 100;
+    controller.tick();
+    controller.pointerUp();
+    const tapDidNotComplete = completed === 0 && cancelled === 1;
+
+    t = 200;
+    controller.pointerDown(0, 0);
+    t = 1000;
+    const holdCompleted = controller.tick() === true && completed === 1;
+
+    t = 1100;
+    controller.pointerDown(0, 0);
+    controller.pointerMove(20, 0);
+    const moveCancelled = cancelled === 2 && completed === 1;
+
+    const passed = tapDidNotComplete && holdCompleted && moveCancelled;
+
+    console.log(`[EM-10] Long-Press Reliability:`);
+    console.log(`       Tap ignored=${tapDidNotComplete}, hold completed=${holdCompleted}, move cancelled=${moveCancelled}`);
+    console.log(`       Status: ${passed ? 'PASSED' : 'FAILED'}\n`);
+    results.push({ name: 'EM-10: Long-press completes; taps do not toggle', passed });
+  }
+
+  const allPassed = results.every(r => r.passed);
+  if (!allPassed) {
+    console.error('ERROR: Some EATEN meal tests failed!');
+    process.exitCode = 1;
+  }
+  return results;
+}
+
 
 
 

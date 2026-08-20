@@ -36,6 +36,98 @@
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.result-card.is-eaten {
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.result-card.is-eaten .result-meal-name,
+.result-card.is-eaten .result-ingredient-name,
+.result-card.is-eaten .result-ingredient-qty {
+  color: var(--muted);
+}
+
+.result-card.is-eaten .result-cal-actual {
+  color: var(--silver);
+}
+
+.result-card.is-eaten .result-ingredient-row {
+  pointer-events: none;
+  cursor: default;
+}
+
+.result-card.is-eaten .result-ingredient-row:hover,
+.result-card.is-eaten .result-ingredient-row:active {
+  background: transparent;
+  transform: none;
+}
+
+.result-card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eaten-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+  color: var(--silver);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.hold-progress {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  margin-left: -18px;
+  margin-top: -18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+  z-index: 2;
+}
+
+.hold-progress.visible {
+  opacity: 1;
+}
+
+.hold-progress-svg {
+  width: 36px;
+  height: 36px;
+  transform: rotate(-90deg);
+}
+
+.hold-progress-track {
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 2.5;
+}
+
+.hold-progress-value {
+  stroke: var(--white);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 97.389;
+  stroke-dashoffset: 97.389;
+}
+
+.result-card.is-holding {
+  outline: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .result-card-header {

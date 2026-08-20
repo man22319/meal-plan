@@ -97,7 +97,11 @@ function setupEventListeners() {
   // Meal count stepper
   document.getElementById('meal-count-dec')?.addEventListener('click', () => {
     if (state.meals.length > 1) {
-      state.meals.pop();
+      const removed = state.meals.pop();
+      if (removed?.id && state.eatenMeals) {
+        delete state.eatenMeals[removed.id];
+        if (removed.name) delete state.eatenMeals[removed.name];
+      }
       Persistence.save();
       UI.renderMeals();
     }

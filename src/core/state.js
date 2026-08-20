@@ -49,6 +49,7 @@ export const state = {
     availabilityOut: 0.002
   },
   actuals: {},
+  eatenMeals: {},
   result: null
 };
 

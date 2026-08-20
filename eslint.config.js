@@ -21,7 +21,11 @@ export default [
         Blob: 'readonly',
         URL: 'readonly',
         console: 'readonly',
-        solver: 'readonly'
+        solver: 'readonly',
+        navigator: 'readonly',
+        performance: 'readonly',
+        requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly'
       }
     },
     rules: {

@@ -28,7 +28,8 @@ export const Persistence = {
       if (state.result) {
         localStorage.setItem(RESULT_KEY, JSON.stringify({
           ...state.result,
-          actuals: state.actuals || {}
+          actuals: state.actuals || {},
+          eatenMeals: state.eatenMeals || {}
         }));
       } else {
         localStorage.removeItem(RESULT_KEY);
@@ -125,6 +126,9 @@ export const Persistence = {
           if (parsedResult.actuals && typeof parsedResult.actuals === 'object') {
             state.actuals = parsedResult.actuals;
           }
+          if (parsedResult.eatenMeals && typeof parsedResult.eatenMeals === 'object') {
+            state.eatenMeals = parsedResult.eatenMeals;
+          }
         }
       }
 
@@ -148,6 +152,7 @@ export const Persistence = {
     state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
     state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
     state.actuals = {};
+    state.eatenMeals = {};
     state.result = null;
   }
 };
@@ -234,8 +239,9 @@ export const ImportExport = {
           });
         }
 
-        Persistence.save();
+        state.eatenMeals = {};
         state.result = null;
+        Persistence.save();
         if (onSuccess) onSuccess();
       } catch {
         if (onError) onError(['Import failed: file is not valid JSON.']);

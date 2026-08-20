@@ -4,7 +4,8 @@
 
 import { state } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
-import { Optimization } from '../core/solver.js';
+import { Optimization, isMealEaten } from '../core/solver.js';
+import { bindPressAndHold } from './pressHold.js';
 
 const EPSILON = 0.001;
 
@@ -490,7 +491,7 @@ export const UI = {
   },
 
   // ── RESULTS ──
-  renderResults() {
+  renderResults({ scroll = true } = {}) {
     const r = state.result;
     if (!r) { UI.hideResults(); return; }
 
@@ -562,10 +563,22 @@ export const UI = {
           : '<div class="result-no-items">No ingredients assigned</div>';
 
         return `
-          <div class="result-card">
+          <div class="result-card ${isMealEaten(meal, mealIdx) ? 'is-eaten' : ''}"
+               data-meal-id="${escAttr(meal.id || mealIdx)}"
+               data-meal-idx="${mealIdx}"
+               aria-label="${escAttr(meal.name)}${isMealEaten(meal, mealIdx) ? ', eaten. Hold to mark uneaten' : '. Hold to mark eaten'}">
+            <div class="hold-progress" aria-hidden="true">
+              <svg viewBox="0 0 36 36" class="hold-progress-svg">
+                <circle class="hold-progress-track" cx="18" cy="18" r="15.5" fill="none" />
+                <circle class="hold-progress-value" cx="18" cy="18" r="15.5" fill="none" />
+              </svg>
+            </div>
             <div class="result-card-header">
               <span class="result-meal-name">${esc(meal.name)}</span>
-              <span class="result-meal-pct">${meal.pct}%</span>
+              <span class="result-card-header-right">
+                ${isMealEaten(meal, mealIdx) ? '<span class="eaten-badge">EATEN</span>' : ''}
+                <span class="result-meal-pct">${meal.pct}%</span>
+              </span>
             </div>
             <div class="result-meal-calories">
               <span class="result-cal-actual">${Math.round(meal.calories)}</span>
@@ -594,7 +607,24 @@ export const UI = {
         `;
       }).join('');
 
+      cardsEl.querySelectorAll('.result-card').forEach(card => {
+        bindPressAndHold(card, {
+          shouldIgnore: (e) => Boolean(e.target.closest('.result-ingredient-row')),
+          onComplete: () => {
+            const mealId = card.dataset.mealId;
+            const outcome = Optimization.toggleMealEaten(mealId);
+            if (outcome.errors && outcome.errors.length > 0) {
+              UI.showErrors(outcome.errors);
+              return;
+            }
+            Persistence.save();
+            UI.renderResults({ scroll: false });
+          }
+        });
+      });
+
       cardsEl.querySelectorAll('.result-ingredient-row').forEach(row => {
+        if (row.closest('.result-card.is-eaten')) return;
         const handleOpen = () => {
           const mealId = row.dataset.mealId;
           const ingId = row.dataset.ingId;
@@ -683,7 +713,9 @@ export const UI = {
     }
 
     section.classList.add('visible');
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (scroll) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   },
 
   hideResults() {
