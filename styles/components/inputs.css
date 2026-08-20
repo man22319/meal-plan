@@ -433,6 +433,12 @@ label {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
+.segmented-control.segmented-control-avail .segmented-btn {
+  font-size: 0.58rem;
+  padding: 6px 4px;
+  letter-spacing: 0.35px;
+}
+
 .ingredient-actions {
   display: flex;
   gap: 8px;

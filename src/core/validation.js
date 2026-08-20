@@ -2,7 +2,7 @@
 // VALIDATION — target, meal, ingredient checks
 // ══════════════════════════════════════════
 
-import { state } from './state.js';
+import { AVAILABILITY_STATES, state } from './state.js';
 
 export const Validation = {
   validateAll() {
@@ -100,8 +100,8 @@ export const Validation = {
       if (typeof ing.quantityMode !== 'undefined' && ing.quantityMode !== 'continuous' && ing.quantityMode !== 'discrete') {
         errors.push(`"${label}": quantity mode must be "continuous" or "discrete".`);
       }
-      if (typeof ing.availability !== 'undefined' && !['normal', 'low', 'running_low', 'out', 'almost_out'].includes(ing.availability)) {
-        errors.push(`"${label}": availability must be "normal", "low", or "out".`);
+      if (typeof ing.availability !== 'undefined' && !AVAILABILITY_STATES.includes(ing.availability)) {
+        errors.push(`"${label}": availability must be "normal", "low", "limited", or "out".`);
       }
     });
     return errors;
@@ -111,11 +111,12 @@ export const Validation = {
     const errors = [];
     const mc = state.mealConstraints;
     if (!mc) return errors;
+    const availableCount = state.ingredients.filter(ing => ing.availability !== 'out').length;
     if (typeof mc.minIngredients === 'number') {
       if (mc.minIngredients < 0) {
         errors.push('Min ingredients per meal cannot be negative.');
-      } else if (mc.minIngredients > state.ingredients.length) {
-        errors.push(`Min ingredients per meal (${mc.minIngredients}) cannot exceed total available ingredients (${state.ingredients.length}).`);
+      } else if (mc.minIngredients > availableCount) {
+        errors.push(`Min ingredients per meal (${mc.minIngredients}) cannot exceed available ingredients (${availableCount}).`);
       }
     }
     if (typeof mc.maxIngredients === 'number') {

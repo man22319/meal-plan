@@ -19,6 +19,12 @@ export function ensureId(item, prefix = 'id') {
   return item.id;
 }
 
+export const AVAILABILITY_STATES = Object.freeze(['normal', 'low', 'limited', 'out']);
+
+export function resolveAvailability(value) {
+  return AVAILABILITY_STATES.includes(value) ? value : 'normal';
+}
+
 export const DEFAULT_TARGETS = { calories: 2335, protein: 151, carbs: 291, fat: 62 };
 export const DEFAULT_MEALS = [
   { id: 'meal_breakfast', name: 'Breakfast', pct: 40 },
@@ -46,7 +52,7 @@ export const state = {
     quantity: 0.00001,
     boundaryExcess: 0.002,
     availabilityLow: 0.0005,
-    availabilityOut: 0.002
+    availabilityLimited: 0.002
   },
   actuals: {},
   eatenItems: {},

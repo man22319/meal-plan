@@ -2,7 +2,7 @@
 // UI RENDERING & DOM UTILITIES
 // ══════════════════════════════════════════
 
-import { state } from '../core/state.js';
+import { resolveAvailability, state } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 import { Optimization } from '../core/solver.js';
 import { bindPressAndHold } from './pressHold.js';
@@ -162,9 +162,14 @@ export const UI = {
 
     container.innerHTML = state.ingredients.map((ing, i) => {
       const mode = ing.quantityMode === 'discrete' ? 'discrete' : 'continuous';
-      const rawAvail = ing.availability;
-      const avail = (rawAvail === 'low' || rawAvail === 'running_low') ? 'low' : (rawAvail === 'out' || rawAvail === 'almost_out') ? 'out' : 'normal';
-      const availHint = avail === 'low' ? 'Moderate penalty' : avail === 'out' ? 'Minimize usage' : 'Used normally';
+      const avail = resolveAvailability(ing.availability);
+      const availHint = avail === 'low'
+        ? 'Limited supply'
+        : avail === 'limited'
+          ? 'Very little remaining'
+          : avail === 'out'
+            ? 'None available — will not be used'
+            : 'Fully available';
 
       return `
       <div class="ingredient-card" data-i="${i}">
@@ -243,18 +248,22 @@ export const UI = {
             <label>Availability</label>
             <span class="ing-mode-hint">${availHint}</span>
           </div>
-          <div class="segmented-control" role="radiogroup" aria-label="Availability">
+          <div class="segmented-control segmented-control-avail" role="radiogroup" aria-label="Availability">
             <button type="button" class="segmented-btn ${avail === 'normal' ? 'active' : ''}"
                     data-i="${i}" data-availability="normal" role="radio" aria-checked="${avail === 'normal'}">
               Normal
             </button>
             <button type="button" class="segmented-btn ${avail === 'low' ? 'active' : ''}"
                     data-i="${i}" data-availability="low" role="radio" aria-checked="${avail === 'low'}">
-              Running Low
+              Low
+            </button>
+            <button type="button" class="segmented-btn ${avail === 'limited' ? 'active' : ''}"
+                    data-i="${i}" data-availability="limited" role="radio" aria-checked="${avail === 'limited'}">
+              Limited
             </button>
             <button type="button" class="segmented-btn ${avail === 'out' ? 'active' : ''}"
                     data-i="${i}" data-availability="out" role="radio" aria-checked="${avail === 'out'}">
-              Almost Out
+              Out
             </button>
           </div>
         </div>

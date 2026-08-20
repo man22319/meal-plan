@@ -134,7 +134,7 @@ export const Optimization = {
     const simplicityPenalty = (penalties && typeof penalties.simplicity === 'number') ? penalties.simplicity : 0.0005;
     const quantityPenalty = (penalties && typeof penalties.quantity === 'number') ? penalties.quantity : 0.00001;
     const availabilityLowPenalty = (penalties && typeof penalties.availabilityLow === 'number') ? penalties.availabilityLow : 0.0005;
-    const availabilityOutPenalty = (penalties && typeof penalties.availabilityOut === 'number') ? penalties.availabilityOut : 0.002;
+    const availabilityLimitedPenalty = (penalties && typeof penalties.availabilityLimited === 'number') ? penalties.availabilityLimited : 0.002;
 
     const minIngPerMeal = mealConstraints && typeof mealConstraints.minIngredients === 'number' ? mealConstraints.minIngredients : 0;
     const maxIngPerMeal = mealConstraints && typeof mealConstraints.maxIngredients === 'number' ? mealConstraints.maxIngredients : 0;
@@ -206,16 +206,30 @@ export const Optimization = {
       const prefS = typeof ing.preferredServings === 'number' && ing.preferredServings > 0 ? ing.preferredServings : 1.0;
 
       let availPenalty = 0;
-      if (ing.availability === 'low' || ing.availability === 'running_low') {
+      if (ing.availability === 'low') {
         availPenalty = availabilityLowPenalty;
-      } else if (ing.availability === 'out' || ing.availability === 'almost_out') {
-        availPenalty = availabilityOutPenalty;
+      } else if (ing.availability === 'limited') {
+        availPenalty = availabilityLimitedPenalty;
       }
 
       meals.forEach((meal, j) => {
         const v_x = `x_${i}_${j}`;
         const v_z = `z_${i}_${j}`;
         const v_excess = `excess_${i}_${j}`;
+
+        if (ing.availability === 'out') {
+          const fixBnd = `fix_${i}_${j}`;
+          model.constraints[fixBnd] = { equal: 0 };
+          model.variables[v_x] = { cost: 0, [fixBnd]: 1 };
+
+          if (needsBinaries) {
+            model.binaries[v_z] = 1;
+            const fixZ = `fix_z_${i}_${j}`;
+            model.constraints[fixZ] = { equal: 0 };
+            model.variables[v_z] = { cost: 0, [fixZ]: 1 };
+          }
+          return;
+        }
 
         const actualRec = getActualRecord(meal, ing, j, i);
         const eatenRec = getEatenItemRecord(meal, ing, j, i);
@@ -426,6 +440,8 @@ export const Optimization = {
       let mCal = 0, mPro = 0, mCarb = 0, mFat = 0;
 
       ingredients.forEach((ing, i) => {
+        if (ing.availability === 'out') return;
+
         const actualRec = getActualRecord(meal, ing, j, i);
         const eatenRec = getEatenItemRecord(meal, ing, j, i);
         const isActual = Boolean(actualRec && typeof actualRec.actualQuantity === 'number');

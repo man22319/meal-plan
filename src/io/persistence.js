@@ -5,6 +5,8 @@
 import {
   state,
   ensureId,
+  resolveAvailability,
+  AVAILABILITY_STATES,
   STORAGE_KEY,
   SETTINGS_KEY,
   TARGETS_KEY,
@@ -61,7 +63,7 @@ export const Persistence = {
               minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? '' : (typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0),
               maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? '' : (typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5),
               quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous',
-              availability: (ing.availability === 'low' || ing.availability === 'running_low') ? 'low' : (ing.availability === 'out' || ing.availability === 'almost_out') ? 'out' : 'normal'
+              availability: resolveAvailability(ing.availability)
             };
           }).filter(Boolean);
 
@@ -171,7 +173,7 @@ export const ImportExport = {
         minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : (typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0),
         maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : (typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5),
         quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous',
-        availability: (ing.availability === 'low' || ing.availability === 'running_low') ? 'low' : (ing.availability === 'out' || ing.availability === 'almost_out') ? 'out' : 'normal'
+        availability: resolveAvailability(ing.availability)
       })),
       mealConstraints: {
         minIngredients: state.mealConstraints?.minIngredients ?? 1,
@@ -217,7 +219,7 @@ export const ImportExport = {
           minServings: typeof ing.minServings === 'number' && ing.minServings >= 0 ? ing.minServings : 0,
           maxServings: typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 5,
           quantityMode: ing.quantityMode === 'discrete' ? 'discrete' : 'continuous',
-          availability: (ing.availability === 'low' || ing.availability === 'running_low') ? 'low' : (ing.availability === 'out' || ing.availability === 'almost_out') ? 'out' : 'normal'
+          availability: resolveAvailability(ing.availability)
         }));
 
         if (parsed.mealConstraints && typeof parsed.mealConstraints === 'object') {
@@ -314,8 +316,8 @@ export const ImportExport = {
       if (typeof ing.quantityMode !== 'undefined' && ing.quantityMode !== 'continuous' && ing.quantityMode !== 'discrete') {
         errors.push(`"${label}": quantityMode must be "continuous" or "discrete".`);
       }
-      if (typeof ing.availability !== 'undefined' && !['normal', 'low', 'running_low', 'out', 'almost_out'].includes(ing.availability)) {
-        errors.push(`"${label}": availability must be "normal", "low", or "out".`);
+      if (typeof ing.availability !== 'undefined' && !AVAILABILITY_STATES.includes(ing.availability)) {
+        errors.push(`"${label}": availability must be "normal", "low", "limited", or "out".`);
       }
     });
 
