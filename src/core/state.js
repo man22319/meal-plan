@@ -7,6 +7,8 @@ export const SETTINGS_KEY = 'macroSolver_settings';
 export const TARGETS_KEY = 'macroSolver_targets';
 export const MEALS_KEY = 'macroSolver_meals';
 export const RESULT_KEY = 'macroSolver_result';
+export const WEIGHT_KEY = 'macroSolver_weights';
+export const INTAKE_KEY = 'macroSolver_intake';
 
 export function generateId(prefix = 'id') {
   return `${prefix}_${Math.random().toString(36).substring(2, 8)}_${Date.now().toString(36)}`;
@@ -56,6 +58,8 @@ export const state = {
   },
   actuals: {},
   eatenItems: {},
+  weightHistory: {},
+  intakeHistory: {},
   result: null
 };
 

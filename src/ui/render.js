@@ -6,6 +6,18 @@ import { resolveAvailability, state, generateId } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 import { Optimization } from '../core/solver.js';
 import { bindPressAndHold } from './pressHold.js';
+import {
+  getLocalDateString,
+  calculateCurrentWeight,
+  calculateMovingAverage,
+  calculateWeightTrend,
+  getCombinedHistoryRows
+} from '../core/stats.js';
+import {
+  createIntakeSnapshot,
+  recordWeightEntry,
+  recordIntakeSnapshot
+} from '../core/history.js';
 
 const EPSILON = 0.001;
 
@@ -696,14 +708,41 @@ export const UI = {
 
     const dailySummaryEl = document.getElementById('daily-summary');
     if (dailySummaryEl) {
+      const today = getLocalDateString();
+      const existingSnapshot = state.intakeHistory && state.intakeHistory[today];
+      const isSnapshotted = Boolean(existingSnapshot);
+      const snapshotBtnText = isSnapshotted ? 'UPDATE INTAKE SNAPSHOT' : 'SNAPSHOT DAY INTAKE';
+      const snapshotBadge = isSnapshotted ? `<span class="snapshot-status-badge">Logged: ${Math.round(existingSnapshot.totals.calories)} kcal</span>` : '';
+
       dailySummaryEl.innerHTML = `
         <div class="summary-card">
-          <div class="summary-title">Daily Summary</div>
+          <div class="summary-header-row">
+            <div class="summary-title">Daily Summary</div>
+            ${snapshotBadge}
+          </div>
           <div class="consolidated-summary-list">
             ${summaryRows}
           </div>
+          <div class="summary-actions">
+            <button type="button" class="btn btn-sm ${isSnapshotted ? 'btn-update-snapshot' : 'btn-snapshot'}" id="snapshot-intake-btn">
+              ${snapshotBtnText}
+            </button>
+          </div>
         </div>
       `;
+
+      const snapshotBtn = document.getElementById('snapshot-intake-btn');
+      if (snapshotBtn) {
+        snapshotBtn.addEventListener('click', () => {
+          const snapshot = createIntakeSnapshot(state, today);
+          if (snapshot) {
+            recordIntakeSnapshot(state.intakeHistory, snapshot);
+            Persistence.save();
+            UI.renderResults({ scroll: false });
+            UI.renderWeightTab();
+          }
+        });
+      }
     }
 
     // Approximate notice
@@ -720,6 +759,133 @@ export const UI = {
     section.classList.add('visible');
     if (scroll) {
       section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  },
+
+  // ── WEIGHT TAB ──
+  renderWeightTab() {
+    const today = getLocalDateString();
+    const todayDateEl = document.getElementById('weight-today-date');
+    if (todayDateEl) {
+      const d = new Date();
+      todayDateEl.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    const todayWeightRec = state.weightHistory && state.weightHistory[today];
+    const weightInput = document.getElementById('daily-weight-input');
+    const recordBtn = document.getElementById('record-weight-btn');
+    const statusHint = document.getElementById('weight-status-hint');
+
+    if (weightInput && recordBtn) {
+      if (todayWeightRec && typeof todayWeightRec.weight === 'number') {
+        weightInput.value = todayWeightRec.weight;
+        recordBtn.textContent = 'UPDATE';
+        if (statusHint) {
+          statusHint.innerHTML = `<span class="recorded-tag">Recorded today: <strong>${todayWeightRec.weight} lb</strong></span>`;
+        }
+      } else {
+        if (!weightInput.value) {
+          weightInput.placeholder = '184.3';
+        }
+        recordBtn.textContent = 'RECORD';
+        if (statusHint) {
+          statusHint.textContent = 'Enter your morning weigh-in';
+        }
+      }
+    }
+
+    // Stats Grid
+    const curW = calculateCurrentWeight(state.weightHistory, today);
+    const avg7 = calculateMovingAverage(state.weightHistory, 7, today);
+    const avg14 = calculateMovingAverage(state.weightHistory, 14, today);
+    const trendRate = calculateWeightTrend(state.weightHistory, { windowDays: 14, minObservations: 3, referenceDate: today });
+
+    const statsGrid = document.getElementById('weight-stats-grid');
+    if (statsGrid) {
+      const curDisplay = curW !== null ? `${curW.toFixed(1)} <span class="stat-unit">lb</span>` : '<span class="dim-dash">—</span>';
+      const avg7Display = avg7 !== null ? `${avg7.toFixed(1)} <span class="stat-unit">lb</span>` : '<span class="dim-dash">—</span>';
+      const avg14Display = avg14 !== null ? `${avg14.toFixed(1)} <span class="stat-unit">lb</span>` : '<span class="dim-dash">—</span>';
+
+      let rateDisplay = '<span class="dim-dash">—</span>';
+      let rateClass = '';
+      if (trendRate !== null) {
+        const sign = trendRate > 0.001 ? '+' : '';
+        rateDisplay = `${sign}${trendRate.toFixed(2)} <span class="stat-unit">lb/wk</span>`;
+        rateClass = trendRate < -0.001 ? 'rate-negative' : trendRate > 0.001 ? 'rate-positive' : '';
+      }
+
+      statsGrid.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">CURRENT</div>
+          <div class="stat-value">${curDisplay}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">7-DAY AVG</div>
+          <div class="stat-value">${avg7Display}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">14-DAY AVG</div>
+          <div class="stat-value">${avg14Display}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">RATE</div>
+          <div class="stat-value ${rateClass}">${rateDisplay}</div>
+        </div>
+      `;
+    }
+
+    // Longitudinal History Table (Outer Join)
+    const rows = getCombinedHistoryRows(state.weightHistory, state.intakeHistory);
+    const countBadge = document.getElementById('history-count-badge');
+    if (countBadge) {
+      countBadge.textContent = `${rows.length} ${rows.length === 1 ? 'day' : 'days'}`;
+    }
+
+    const tableContainer = document.getElementById('history-table-container');
+    if (tableContainer) {
+      if (rows.length === 0) {
+        tableContainer.innerHTML = '<div class="history-empty">No historical weight or intake records logged yet.</div>';
+      } else {
+        const tableRows = rows.map(r => {
+          const wStr = r.hasWeight ? `${r.weight.toFixed(1)}` : '<span class="dim-dash">—</span>';
+          const calStr = r.hasIntake ? `${Math.round(r.calories)}` : '<span class="dim-dash">—</span>';
+          const proStr = r.hasIntake ? `${r.protein.toFixed(1)}g` : '<span class="dim-dash">—</span>';
+          const carbStr = r.hasIntake ? `${r.carbs.toFixed(1)}g` : '<span class="dim-dash">—</span>';
+          const fatStr = r.hasIntake ? `${r.fat.toFixed(1)}g` : '<span class="dim-dash">—</span>';
+
+          const parts = r.date.split('-');
+          const displayDate = parts.length === 3 ? `${parts[1]}/${parts[2]}/${parts[0].slice(2)}` : r.date;
+
+          return `
+            <tr>
+              <td class="col-date">${esc(displayDate)}</td>
+              <td class="col-weight">${wStr}</td>
+              <td class="col-kcal">${calStr}</td>
+              <td class="col-protein">${proStr}</td>
+              <td class="col-carbs">${carbStr}</td>
+              <td class="col-fat">${fatStr}</td>
+            </tr>
+          `;
+        }).join('');
+
+        tableContainer.innerHTML = `
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th class="col-date">DATE</th>
+                <th class="col-weight">WEIGHT (lb)</th>
+                <th class="col-kcal">KCAL</th>
+                <th class="col-protein">PROTEIN</th>
+                <th class="col-carbs">CARBS</th>
+                <th class="col-fat">FAT</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
+          </table>
+        `;
+      }
     }
   },
 

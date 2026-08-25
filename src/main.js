@@ -6,6 +6,8 @@ import { state, generateId } from './core/state.js';
 import { Optimization } from './core/solver.js';
 import { Persistence, ImportExport } from './io/persistence.js';
 import { UI } from './ui/render.js';
+import { recordWeightEntry } from './core/history.js';
+import { getLocalDateString } from './core/stats.js';
 
 function setupEventListeners() {
   // Solve
@@ -71,6 +73,7 @@ function setupEventListeners() {
     UI.renderMeals();
     UI.renderIngredients();
     UI.renderWeights();
+    UI.renderWeightTab();
     UI.hideResults();
     UI.clearErrors();
   });
@@ -78,24 +81,64 @@ function setupEventListeners() {
   // Tab Navigation
   const solverTabBtn = document.getElementById('tab-btn-solver');
   const ingredientsTabBtn = document.getElementById('tab-btn-ingredients');
+  const weightTabBtn = document.getElementById('tab-btn-weight');
   const solverPanel = document.getElementById('tab-solver');
   const ingredientsPanel = document.getElementById('tab-ingredients');
+  const weightPanel = document.getElementById('tab-weight');
 
   function switchTab(target) {
     const isSolver = target === 'solver';
+    const isIngredients = target === 'ingredients';
+    const isWeight = target === 'weight';
+
     solverTabBtn?.classList.toggle('active', isSolver);
     solverTabBtn?.setAttribute('aria-selected', isSolver ? 'true' : 'false');
-    ingredientsTabBtn?.classList.toggle('active', !isSolver);
-    ingredientsTabBtn?.setAttribute('aria-selected', !isSolver ? 'true' : 'false');
+    ingredientsTabBtn?.classList.toggle('active', isIngredients);
+    ingredientsTabBtn?.setAttribute('aria-selected', isIngredients ? 'true' : 'false');
+    weightTabBtn?.classList.toggle('active', isWeight);
+    weightTabBtn?.setAttribute('aria-selected', isWeight ? 'true' : 'false');
 
     solverPanel?.classList.toggle('hidden', !isSolver);
     solverPanel?.classList.toggle('active', isSolver);
-    ingredientsPanel?.classList.toggle('hidden', isSolver);
-    ingredientsPanel?.classList.toggle('active', !isSolver);
+    ingredientsPanel?.classList.toggle('hidden', !isIngredients);
+    ingredientsPanel?.classList.toggle('active', isIngredients);
+    weightPanel?.classList.toggle('hidden', !isWeight);
+    weightPanel?.classList.toggle('active', isWeight);
+
+    if (isWeight) {
+      UI.renderWeightTab();
+    }
   }
 
   solverTabBtn?.addEventListener('click', () => switchTab('solver'));
   ingredientsTabBtn?.addEventListener('click', () => switchTab('ingredients'));
+  weightTabBtn?.addEventListener('click', () => switchTab('weight'));
+
+  // Record Weight Action
+  const handleRecordWeight = () => {
+    const input = document.getElementById('daily-weight-input');
+    if (!input) return;
+    const val = parseFloat(input.value);
+    if (isNaN(val) || val <= 0) {
+      input.focus();
+      return;
+    }
+    const today = getLocalDateString();
+    const res = recordWeightEntry(state.weightHistory, val, today);
+    if (!res.error) {
+      state.weightHistory = res.weightHistory;
+      Persistence.save();
+      UI.renderWeightTab();
+    }
+  };
+
+  document.getElementById('record-weight-btn')?.addEventListener('click', handleRecordWeight);
+  document.getElementById('daily-weight-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleRecordWeight();
+    }
+  });
 
   // Meal count stepper
   document.getElementById('meal-count-dec')?.addEventListener('click', () => {
@@ -139,6 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.renderMeals();
   UI.renderIngredients();
   UI.renderWeights();
+  UI.renderWeightTab();
   if (state.result) {
     UI.renderResults();
   }

@@ -12,6 +12,8 @@ import {
   TARGETS_KEY,
   MEALS_KEY,
   RESULT_KEY,
+  WEIGHT_KEY,
+  INTAKE_KEY,
   DEFAULT_INGREDIENTS,
   DEFAULT_TARGETS,
   DEFAULT_MEALS
@@ -27,6 +29,8 @@ export const Persistence = {
       }));
       localStorage.setItem(TARGETS_KEY, JSON.stringify(state.targets));
       localStorage.setItem(MEALS_KEY, JSON.stringify(state.meals));
+      localStorage.setItem(WEIGHT_KEY, JSON.stringify(state.weightHistory || {}));
+      localStorage.setItem(INTAKE_KEY, JSON.stringify(state.intakeHistory || {}));
       if (state.result) {
         localStorage.setItem(RESULT_KEY, JSON.stringify({
           ...state.result,
@@ -120,6 +124,22 @@ export const Persistence = {
         }
       }
 
+      const rawWeight = localStorage.getItem(WEIGHT_KEY);
+      if (rawWeight) {
+        const parsedWeight = JSON.parse(rawWeight);
+        if (parsedWeight && typeof parsedWeight === 'object' && !Array.isArray(parsedWeight)) {
+          state.weightHistory = parsedWeight;
+        }
+      }
+
+      const rawIntake = localStorage.getItem(INTAKE_KEY);
+      if (rawIntake) {
+        const parsedIntake = JSON.parse(rawIntake);
+        if (parsedIntake && typeof parsedIntake === 'object' && !Array.isArray(parsedIntake)) {
+          state.intakeHistory = parsedIntake;
+        }
+      }
+
       const rawResult = localStorage.getItem(RESULT_KEY);
       if (rawResult) {
         const parsedResult = JSON.parse(rawResult);
@@ -146,6 +166,8 @@ export const Persistence = {
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(TARGETS_KEY);
       localStorage.removeItem(MEALS_KEY);
+      localStorage.removeItem(WEIGHT_KEY);
+      localStorage.removeItem(INTAKE_KEY);
       localStorage.removeItem(RESULT_KEY);
     } catch {}
     state.targets = JSON.parse(JSON.stringify(DEFAULT_TARGETS));
@@ -155,6 +177,8 @@ export const Persistence = {
     state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
     state.actuals = {};
     state.eatenItems = {};
+    state.weightHistory = {};
+    state.intakeHistory = {};
     state.result = null;
   }
 };
