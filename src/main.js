@@ -2,7 +2,7 @@
 // BOOT — Application Entry Point
 // ══════════════════════════════════════════
 
-import { state } from './core/state.js';
+import { state, generateId } from './core/state.js';
 import { Optimization } from './core/solver.js';
 import { Persistence, ImportExport } from './io/persistence.js';
 import { UI } from './ui/render.js';
@@ -10,7 +10,10 @@ import { UI } from './ui/render.js';
 function setupEventListeners() {
   // Solve
   document.getElementById('solve-btn')?.addEventListener('click', () => {
-    const outcome = Optimization.solve();
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+    const outcome = Optimization.solve({ preserveActuals: false });
     if (outcome.errors && outcome.errors.length > 0) {
       UI.showErrors(outcome.errors);
       if (!outcome.result) {
@@ -98,12 +101,22 @@ function setupEventListeners() {
   document.getElementById('meal-count-dec')?.addEventListener('click', () => {
     if (state.meals.length > 1) {
       const removed = state.meals.pop();
-      if (removed?.id && state.eatenItems) {
-        Object.keys(state.eatenItems).forEach(key => {
-          if (key.startsWith(`${removed.id}_`) || (removed.name && key.startsWith(`${removed.name}_`))) {
-            delete state.eatenItems[key];
-          }
-        });
+      if (removed) {
+        const matchKey = (key) =>
+          (removed.id && key.startsWith(`${removed.id}_`)) ||
+          (removed.name && key.startsWith(`${removed.name}_`)) ||
+          key.startsWith(`${state.meals.length}_`);
+
+        if (state.eatenItems) {
+          Object.keys(state.eatenItems).forEach(key => {
+            if (matchKey(key)) delete state.eatenItems[key];
+          });
+        }
+        if (state.actuals) {
+          Object.keys(state.actuals).forEach(key => {
+            if (matchKey(key)) delete state.actuals[key];
+          });
+        }
       }
       Persistence.save();
       UI.renderMeals();
@@ -112,7 +125,8 @@ function setupEventListeners() {
 
   document.getElementById('meal-count-inc')?.addEventListener('click', () => {
     if (state.meals.length < 6) {
-      state.meals.push({ name: `Meal ${state.meals.length + 1}`, pct: 0 });
+      const id = generateId('meal');
+      state.meals.push({ id, name: `Meal ${state.meals.length + 1}`, pct: 0 });
       Persistence.save();
       UI.renderMeals();
     }

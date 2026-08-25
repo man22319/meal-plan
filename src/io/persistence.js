@@ -208,7 +208,8 @@ export const ImportExport = {
           if (onError) onError(errors);
           return;
         }
-        state.ingredients = parsed.ingredients.map(ing => ({
+        state.ingredients = parsed.ingredients.map((ing, idx) => ({
+          id: (typeof ing.id === 'string' && ing.id.trim() !== '') ? ing.id.trim() : ensureId(ing, `ing_${idx}`),
           name: ing.name.trim(),
           servingSize: ing.servingSize,
           unit: ing.unit.trim(),

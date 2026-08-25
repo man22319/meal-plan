@@ -2,7 +2,7 @@
 // UI RENDERING & DOM UTILITIES
 // ══════════════════════════════════════════
 
-import { resolveAvailability, state } from '../core/state.js';
+import { resolveAvailability, state, generateId } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 import { Optimization } from '../core/solver.js';
 import { bindPressAndHold } from './pressHold.js';
@@ -308,7 +308,24 @@ export const UI = {
 
     container.querySelectorAll('.del-btn').forEach(btn => {
       btn.addEventListener('click', function () {
-        state.ingredients.splice(parseInt(this.dataset.del, 10), 1);
+        const delIdx = parseInt(this.dataset.del, 10);
+        const removed = state.ingredients.splice(delIdx, 1)[0];
+        if (removed) {
+          const matchKey = (key) =>
+            (removed.id && key.endsWith(`_${removed.id}`)) ||
+            (removed.name && key.endsWith(`_${removed.name}`));
+
+          if (state.eatenItems) {
+            Object.keys(state.eatenItems).forEach(key => {
+              if (matchKey(key)) delete state.eatenItems[key];
+            });
+          }
+          if (state.actuals) {
+            Object.keys(state.actuals).forEach(key => {
+              if (matchKey(key)) delete state.actuals[key];
+            });
+          }
+        }
         Persistence.save();
         UI.renderIngredients();
       });
@@ -317,6 +334,7 @@ export const UI = {
 
   addIngredient() {
     state.ingredients.push({
+      id: generateId('ing'),
       name: '',
       servingSize: '',
       unit: 'g',
@@ -431,7 +449,7 @@ export const UI = {
         UI.clearErrors();
       }
       Persistence.save();
-      UI.renderResults();
+      UI.renderResults({ scroll: false });
       closeModal();
     };
 
@@ -454,7 +472,7 @@ export const UI = {
         UI.clearErrors();
       }
       Persistence.save();
-      UI.renderResults();
+      UI.renderResults({ scroll: false });
       closeModal();
     });
   },

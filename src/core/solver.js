@@ -99,9 +99,9 @@ function findResultItem(mealId, ingId) {
 export const Optimization = {
   /**
    * Runs validation, builds MILP model, solves, and writes state.result.
-   * preserveActuals: whether to keep recorded actual portion constraints (default: true).
+   * preserveActuals: whether to keep recorded actual portion constraints (default: false).
    */
-  solve({ preserveActuals = true } = {}) {
+  solve({ preserveActuals = false } = {}) {
     const errors = Validation.validateAll();
     if (errors.length > 0) {
       if (!hasAnyEatenItems()) {
@@ -363,11 +363,22 @@ export const Optimization = {
 
   recordActual(mealRef, ingRef, actualQuantity, plannedQuantityAtRecord) {
     const { mealId, ingId } = resolveMealAndIngIds(mealRef, ingRef);
+    const actQty = Number(actualQuantity);
+
+    const existingItem = findResultItem(mealId, ingId);
+    const planQty = typeof plannedQuantityAtRecord === 'number'
+      ? plannedQuantityAtRecord
+      : (typeof existingItem?.plannedQuantity === 'number' ? existingItem.plannedQuantity : null);
+
+    if (planQty !== null && Math.abs(actQty - planQty) < 0.001) {
+      return Optimization.clearActual(mealRef, ingRef);
+    }
+
     if (!state.actuals) state.actuals = {};
     const key = `${mealId}_${ingId}`;
     state.actuals[key] = {
-      actualQuantity: Number(actualQuantity),
-      plannedQuantityAtRecord: typeof plannedQuantityAtRecord === 'number' ? plannedQuantityAtRecord : Number(actualQuantity)
+      actualQuantity: actQty,
+      plannedQuantityAtRecord: planQty !== null ? planQty : actQty
     };
     return Optimization.solve({ preserveActuals: true });
   },

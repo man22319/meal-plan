@@ -13,7 +13,7 @@ select {
   border-radius: 8px;
   color: var(--white);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.8rem;
+  font-size: 16px;
   font-weight: 500;
   padding: 8px 10px;
   outline: none;
@@ -181,6 +181,7 @@ label {
 .meal-name-input {
   flex: 1;
   min-width: 0;
+  font-size: 16px;
 }
 
 .meal-pct-wrap {
@@ -191,9 +192,10 @@ label {
 }
 
 .meal-pct-input {
-  width: 52px;
+  width: 58px;
   text-align: right;
   padding-right: 4px;
+  font-size: 16px;
 }
 
 .pct-suffix {
@@ -269,7 +271,7 @@ label {
 
 .ing-name-row .ing-name-input {
   flex: 1;
-  font-size: 0.85rem;
+  font-size: 16px;
   font-weight: 500;
 }
 
@@ -323,7 +325,7 @@ label {
 }
 
 .ing-field input {
-  font-size: 0.75rem;
+  font-size: 16px;
   padding: 6px 8px;
 }
 
@@ -360,8 +362,8 @@ label {
 
 .ing-macro-inputs input {
   text-align: right;
-  padding: 6px 6px;
-  font-size: 0.75rem;
+  padding: 6px 4px;
+  font-size: 16px;
 }
 
 /* ── Quantity Mode Segmented Control ── */

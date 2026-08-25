@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════
 
 export const HOLD_DURATION_MS = 800;
-export const HOLD_MOVE_THRESHOLD_PX = 36;
+export const HOLD_MOVE_THRESHOLD_PX = 16;
 
 export function createPressHoldController({
   duration = HOLD_DURATION_MS,
@@ -209,7 +209,7 @@ export function bindPressAndHold(el, { onComplete } = {}) {
     window.addEventListener('touchend', onRelease, true);
     window.addEventListener('touchcancel', onRelease, true);
     window.addEventListener('pointermove', onMove, true);
-    window.addEventListener('touchmove', onMove, { capture: true, passive: false });
+    window.addEventListener('touchmove', onMove, { capture: true, passive: true });
   }
 
   function startHold(e) {
@@ -233,7 +233,6 @@ export function bindPressAndHold(el, { onComplete } = {}) {
 
   function onMove(e) {
     if (!controller.isActive()) return;
-    if (e.cancelable) e.preventDefault();
     const { x, y } = eventPoint(e);
     controller.pointerMove(x, y);
     if (!controller.isActive()) {

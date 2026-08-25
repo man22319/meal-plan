@@ -5,6 +5,7 @@
 
 #results-section {
   display: none;
+  scroll-margin-top: 80px;
 }
 
 #results-section.visible {
@@ -39,7 +40,7 @@
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
-  touch-action: none;
+  touch-action: pan-y;
 }
 
 .eaten-badge {
@@ -161,7 +162,7 @@
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  touch-action: none;
+  touch-action: pan-y;
   position: relative;
   transition: background 0.15s ease, transform 0.1s ease;
 }
