@@ -4,12 +4,49 @@
 
 import { state, generateId } from './core/state.js';
 import { Optimization } from './core/solver.js';
+import { formatDailySummary } from './core/formatters.js';
 import { Persistence, ImportExport } from './io/persistence.js';
 import { UI } from './ui/render.js';
 import { recordWeightEntry } from './core/history.js';
 import { getLocalDateString } from './core/stats.js';
 
 function setupEventListeners() {
+  // Copy daily summary
+  const copyBtn = document.getElementById('copy-summary-btn');
+  copyBtn?.addEventListener('click', async () => {
+    if (!state.result) return;
+    const summary = formatDailySummary(state.result, state.targets);
+
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+      UI.showErrors(['Clipboard unavailable. Please allow clipboard permissions.']);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(summary);
+      const originalText = copyBtn.textContent;
+      copyBtn.textContent = 'COPIED';
+      setTimeout(() => {
+        copyBtn.textContent = originalText;
+      }, 1500);
+    } catch {
+      UI.showErrors(['Clipboard write failed. Please check clipboard permissions.']);
+    }
+  });
+
+  // Uneaten all
+  document.getElementById('uneaten-all-btn')?.addEventListener('click', () => {
+    const hasEaten = Boolean(state.eatenItems && Object.keys(state.eatenItems).length > 0) ||
+      Boolean(state.result?.mealResults?.some(m => m.items?.some(it => it.isEaten)));
+    if (!hasEaten) return;
+
+    if (window.confirm('Clear all EATEN markers? Recorded actual quantities will be preserved.')) {
+      Optimization.unmarkAllIngredientsEaten();
+      Persistence.save();
+      UI.renderResults({ scroll: false });
+    }
+  });
+
   // Solve
   document.getElementById('solve-btn')?.addEventListener('click', () => {
     if (document.activeElement && typeof document.activeElement.blur === 'function') {

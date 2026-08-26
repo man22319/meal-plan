@@ -32,6 +32,8 @@ import { state, STORAGE_KEY, SETTINGS_KEY, TARGETS_KEY, MEALS_KEY, RESULT_KEY, D
 import { Validation } from '../src/core/validation.js';
 import { Persistence, ImportExport } from '../src/io/persistence.js';
 import { createPressHoldController } from '../src/ui/pressHold.js';
+import { runFormattersTests } from './formatters.test.js';
+import { runUneatenAllTestSuite } from './uneaten_all.test.js';
 
 // Base nutritional target
 export const DAILY_TARGET = {
@@ -735,6 +737,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   // Run EATEN / UNEATEN meal locking test suite
   runEatenMealTestSuite();
+
+  // Run Formatters & Plain-text Daily Summary test suite
+  runFormattersTests();
+
+  // Run UNEATEN ALL test suite
+  runUneatenAllTestSuite();
 
   console.log('\n');
   const sim = runMealSplitSimulations();

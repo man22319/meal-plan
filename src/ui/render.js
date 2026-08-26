@@ -539,6 +539,13 @@ export const UI = {
 
     UI.initActualModal();
 
+    const uneatenAllBtn = document.getElementById('uneaten-all-btn');
+    if (uneatenAllBtn) {
+      const hasEaten = Boolean(state.eatenItems && Object.keys(state.eatenItems).length > 0) ||
+        Boolean(r.mealResults?.some(m => m.items?.some(it => it.isEaten)));
+      uneatenAllBtn.disabled = !hasEaten;
+    }
+
     // Meal cards
     const cardsEl = document.getElementById('meal-result-cards');
     if (cardsEl) {
@@ -892,6 +899,8 @@ export const UI = {
   hideResults() {
     const section = document.getElementById('results-section');
     if (section) section.classList.remove('visible');
+    const uneatenAllBtn = document.getElementById('uneaten-all-btn');
+    if (uneatenAllBtn) uneatenAllBtn.disabled = true;
   },
 
   showErrors(errors) {

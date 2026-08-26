@@ -474,6 +474,20 @@ export const Optimization = {
     return Optimization.markIngredientEaten(mealRef, ingRef);
   },
 
+  unmarkAllIngredientsEaten() {
+    state.eatenItems = {};
+    if (state.result?.mealResults) {
+      state.result.mealResults.forEach(meal => {
+        if (Array.isArray(meal.items)) {
+          meal.items.forEach(item => {
+            item.isEaten = false;
+          });
+        }
+      });
+    }
+    return { result: state.result };
+  },
+
   _extract(raw) {
     const { meals, targets } = state;
     const ingredients = state.ingredients.map(ing => ({
@@ -513,6 +527,11 @@ export const Optimization = {
           const servings = displayQuantity / (ing.servingSize || 100);
 
           if (servings > 0.001 || z > 0.5 || lockedQuantity > 0) {
+            const itemCal = servings * ing.calories;
+            const itemPro = servings * ing.protein;
+            const itemCarb = servings * ing.carbs;
+            const itemFat = servings * ing.fat;
+
             items.push({
               id: ing.id,
               mealId: meal.id,
@@ -527,15 +546,19 @@ export const Optimization = {
               unit: ing.unit,
               servings,
               servingSize: ing.servingSize,
+              calories: itemCal,
+              protein: itemPro,
+              carbs: itemCarb,
+              fat: itemFat,
               selected: servings > 0.001 || z > 0.5,
               quantityMode: ing.quantityMode || 'continuous',
               availability: ing.availability || 'normal'
             });
 
-            mCal += servings * ing.calories;
-            mPro += servings * ing.protein;
-            mCarb += servings * ing.carbs;
-            mFat += servings * ing.fat;
+            mCal += itemCal;
+            mPro += itemPro;
+            mCarb += itemCarb;
+            mFat += itemFat;
           }
         } else {
           if (ing.quantityMode === 'discrete') {
@@ -544,6 +567,10 @@ export const Optimization = {
           if (s > 0.001) {
             const plannedQuantity = s * ing.servingSize;
             const displayQuantity = plannedQuantity;
+            const itemCal = s * ing.calories;
+            const itemPro = s * ing.protein;
+            const itemCarb = s * ing.carbs;
+            const itemFat = s * ing.fat;
 
             items.push({
               id: ing.id,
@@ -559,15 +586,19 @@ export const Optimization = {
               unit: ing.unit,
               servings: s,
               servingSize: ing.servingSize,
+              calories: itemCal,
+              protein: itemPro,
+              carbs: itemCarb,
+              fat: itemFat,
               selected: z > 0.5,
               quantityMode: ing.quantityMode || 'continuous',
               availability: ing.availability || 'normal'
             });
 
-            mCal += s * ing.calories;
-            mPro += s * ing.protein;
-            mCarb += s * ing.carbs;
-            mFat += s * ing.fat;
+            mCal += itemCal;
+            mPro += itemPro;
+            mCarb += itemCarb;
+            mFat += itemFat;
           }
         }
       });
