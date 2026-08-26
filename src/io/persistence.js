@@ -209,7 +209,9 @@ export const ImportExport = {
         carbs: state.weights?.carbs ?? 0.5,
         fat: state.weights?.fat ?? 0.5,
         mealAllocation: state.weights?.mealAllocation ?? 0.2
-      }
+      },
+      weightHistory: state.weightHistory || {},
+      intakeHistory: state.intakeHistory || {}
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -264,6 +266,14 @@ export const ImportExport = {
               state.weights[k] = parsed.weights[k];
             }
           });
+        }
+
+        if (parsed.weightHistory && typeof parsed.weightHistory === 'object' && !Array.isArray(parsed.weightHistory)) {
+          state.weightHistory = parsed.weightHistory;
+        }
+
+        if (parsed.intakeHistory && typeof parsed.intakeHistory === 'object' && !Array.isArray(parsed.intakeHistory)) {
+          state.intakeHistory = parsed.intakeHistory;
         }
 
         state.eatenItems = {};
@@ -378,6 +388,49 @@ export const ImportExport = {
               errors.push(`weights.${k} must be a non-negative number.`);
             }
           }
+        });
+      }
+    }
+
+    if (typeof data.weightHistory !== 'undefined') {
+      if (!data.weightHistory || typeof data.weightHistory !== 'object' || Array.isArray(data.weightHistory)) {
+        errors.push('weightHistory must be an object.');
+      } else {
+        Object.entries(data.weightHistory).forEach(([date, rec]) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            errors.push(`weightHistory key "${date}" is not a valid YYYY-MM-DD date.`);
+            return;
+          }
+          const weight = typeof rec === 'number' ? rec : rec?.weight;
+          if (typeof weight !== 'number' || isNaN(weight) || weight <= 0) {
+            errors.push(`weightHistory["${date}"]: weight must be a positive number.`);
+          }
+        });
+      }
+    }
+
+    if (typeof data.intakeHistory !== 'undefined') {
+      if (!data.intakeHistory || typeof data.intakeHistory !== 'object' || Array.isArray(data.intakeHistory)) {
+        errors.push('intakeHistory must be an object.');
+      } else {
+        Object.entries(data.intakeHistory).forEach(([date, rec]) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            errors.push(`intakeHistory key "${date}" is not a valid YYYY-MM-DD date.`);
+            return;
+          }
+          if (!rec || typeof rec !== 'object') {
+            errors.push(`intakeHistory["${date}"]: must be an object.`);
+            return;
+          }
+          if (!rec.totals || typeof rec.totals !== 'object') {
+            errors.push(`intakeHistory["${date}"]: missing "totals" object.`);
+            return;
+          }
+          ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
+            if (typeof rec.totals[k] !== 'undefined' && (typeof rec.totals[k] !== 'number' || rec.totals[k] < 0)) {
+              errors.push(`intakeHistory["${date}"].totals.${k} must be a non-negative number.`);
+            }
+          });
         });
       }
     }
