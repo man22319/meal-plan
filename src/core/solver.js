@@ -133,8 +133,6 @@ export const Optimization = {
 
     const simplicityPenalty = (penalties && typeof penalties.simplicity === 'number') ? penalties.simplicity : 0.0005;
     const quantityPenalty = (penalties && typeof penalties.quantity === 'number') ? penalties.quantity : 0.00001;
-    const availabilityLowPenalty = (penalties && typeof penalties.availabilityLow === 'number') ? penalties.availabilityLow : 0.0005;
-    const availabilityLimitedPenalty = (penalties && typeof penalties.availabilityLimited === 'number') ? penalties.availabilityLimited : 0.002;
 
     const minIngPerMeal = mealConstraints && typeof mealConstraints.minIngredients === 'number' ? mealConstraints.minIngredients : 0;
     const maxIngPerMeal = mealConstraints && typeof mealConstraints.maxIngredients === 'number' ? mealConstraints.maxIngredients : 0;
@@ -199,18 +197,53 @@ export const Optimization = {
 
     const boundaryExcessPenalty = (penalties && typeof penalties.boundaryExcess === 'number') ? penalties.boundaryExcess : 0.002;
 
-    // 4. Decision variables: x_i_j (servings), optional z_i_j (binary selection), and soft boundary excess
+    const AVAILABILITY_CAPS = {
+      low: 3.0,
+      limited: 2.0
+    };
+
+    // Pre-validation: verify that locked EATEN/actual quantities do not exceed availability limits
+    const capacityErrors = [];
+    ingredients.forEach((ing, i) => {
+      let totalLockedServings = 0;
+      meals.forEach((meal, j) => {
+        const actualRec = getActualRecord(meal, ing, j, i);
+        const eatenRec = getEatenItemRecord(meal, ing, j, i);
+        const lockQty = (actualRec && typeof actualRec.actualQuantity === 'number')
+          ? actualRec.actualQuantity
+          : (eatenRec && typeof eatenRec.quantity === 'number' ? eatenRec.quantity : null);
+        if (lockQty !== null) {
+          totalLockedServings += lockQty / (ing.servingSize || 100);
+        }
+      });
+
+      if (ing.availability === 'out' && totalLockedServings > 0.001) {
+        capacityErrors.push(`EATEN/Actual quantity for "${ing.name}" (${totalLockedServings.toFixed(2)} servings) exceeds OUT inventory limit (0.00 servings).`);
+      } else if (ing.availability in AVAILABILITY_CAPS) {
+        const cap = AVAILABILITY_CAPS[ing.availability];
+        if (totalLockedServings > cap + 0.001) {
+          capacityErrors.push(`EATEN/Actual quantity for "${ing.name}" (${totalLockedServings.toFixed(2)} servings) exceeds available ${ing.availability.toUpperCase()} inventory limit (${cap.toFixed(2)} servings).`);
+        }
+      }
+    });
+
+    if (capacityErrors.length > 0) {
+      return { errors: capacityErrors };
+    }
+
+    // 4. Daily aggregate availability capacity constraints (LOW <= 3.0, LIMITED <= 2.0)
+    ingredients.forEach((ing, i) => {
+      if (ing.availability in AVAILABILITY_CAPS) {
+        model.constraints[`daily_cap_${i}`] = { max: AVAILABILITY_CAPS[ing.availability] };
+      }
+    });
+
+    // 5. Decision variables: x_i_j (servings), optional z_i_j (binary selection), and soft boundary excess
     ingredients.forEach((ing, i) => {
       const maxS = typeof ing.maxServings === 'number' && ing.maxServings > 0 ? ing.maxServings : 10;
       const minS = typeof ing.minServings === 'number' && ing.minServings > 0 ? ing.minServings : 0;
       const prefS = typeof ing.preferredServings === 'number' && ing.preferredServings > 0 ? ing.preferredServings : 1.0;
-
-      let availPenalty = 0;
-      if (ing.availability === 'low') {
-        availPenalty = availabilityLowPenalty;
-      } else if (ing.availability === 'limited') {
-        availPenalty = availabilityLimitedPenalty;
-      }
+      const hasDailyCap = ing.availability in AVAILABILITY_CAPS;
 
       meals.forEach((meal, j) => {
         const v_x = `x_${i}_${j}`;
@@ -250,6 +283,10 @@ export const Optimization = {
           });
           xEntry[`meal_${j}`] = ing.calories;
 
+          if (hasDailyCap) {
+            xEntry[`daily_cap_${i}`] = 1;
+          }
+
           // Lock variable exactly to recorded physical portion
           const fixBnd = `fix_${i}_${j}`;
           model.constraints[fixBnd] = { equal: sActual };
@@ -272,15 +309,19 @@ export const Optimization = {
 
           model.variables[v_x] = xEntry;
         } else {
-          // Unfixed decision variable
+          // Unfixed decision variable (pure quantity penalty without availability cost distortion)
           const xEntry = {
-            cost: quantityPenalty + availPenalty
+            cost: quantityPenalty
           };
 
           macros.forEach(m => {
             xEntry[`daily_${m}`] = ing[m];
           });
           xEntry[`meal_${j}`] = ing.calories;
+
+          if (hasDailyCap) {
+            xEntry[`daily_cap_${i}`] = 1;
+          }
 
           // Soft boundary preference: penalize servings above preferred baseline
           if (maxS > prefS) {
@@ -297,7 +338,7 @@ export const Optimization = {
             model.binaries[v_z] = 1;
 
             const zEntry = {
-              cost: simplicityPenalty + (availPenalty > 0 ? availPenalty * 0.5 : 0)
+              cost: simplicityPenalty
             };
 
             // Link upper bound: x_ij - maxServings_i * z_ij <= 0
