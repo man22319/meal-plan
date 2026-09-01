@@ -54,8 +54,15 @@ export function applyCandidateToState(stateClone, candidate) {
 
 /**
  * Simulates the Continuous LP Relaxation of a candidate action to compute a rigorous lower bound.
- * Because continuous LP is a relaxation of the MILP, J*_LP <= J*_MILP is mathematically guaranteed.
- * Thus, DeltaJ_max = J_B - J*_LP is an upper bound on achievable improvement.
+ *
+ * Mathematical Contract (Continuous LP Relaxation of Minimization MILP):
+ *   Since continuous LP is a relaxation of discrete MILP:
+ *     J*_LP <= J*_MILP
+ *   Therefore, the maximum possible improvement achievable by the candidate is bounded:
+ *     ΔJ_MILP = J_B - J*_MILP <= J_B - J*_LP = ΔJ_max
+ *   Consequently, if ΔJ_max < ε_J, then ΔJ_MILP < ε_J is mathematically guaranteed.
+ *   This provides a provably safe pruning condition:
+ *     ΔJ_max < ε_J => PRUNE (candidate cannot achieve meaningful improvement in Stage 3 exact solve).
  *
  * @param {object} baseState - Base application state.
  * @param {object} candidate - Candidate action descriptor.
@@ -76,7 +83,7 @@ export function simulateCandidateLPBound(baseState, candidate, baseSolve, minThr
       maxPossibleImprovement: -Infinity,
       pruned: true,
       reason: 'LP_INFEASIBLE',
-      effectiveThreshold: minThreshold ?? PRECISION.OBJECTIVE_EPS,
+      effectiveThreshold: minThreshold ?? PRECISION.PRUNING_EPS,
       lpSolve: null
     };
   }
@@ -88,7 +95,7 @@ export function simulateCandidateLPBound(baseState, candidate, baseSolve, minThr
   // Exact mathematical contract: prune only if the theoretical upper bound on improvement
   // is strictly below the declared minimum meaningful improvement threshold.
   const isCapacityType = ['INCREASE_CAPACITY', 'REDUCE_CAPACITY'].includes(candidate?.type);
-  const defaultThreshold = isCapacityType ? PRECISION.OBJECTIVE_CAPACITY_EPS : PRECISION.OBJECTIVE_EPS;
+  const defaultThreshold = isCapacityType ? PRECISION.OBJECTIVE_CAPACITY_EPS : PRECISION.PRUNING_EPS;
   const effectiveThreshold = typeof minThreshold === 'number' ? minThreshold : defaultThreshold;
   const pruned = maxPossibleImprovement < effectiveThreshold;
 
@@ -148,7 +155,18 @@ export function simulateCandidate(baseState, candidate, baselineSolve = null, op
       feasible: false,
       objective: Infinity,
       exactImprovement: -Infinity,
+      integralityGapAbs: 0,
+      integralityGapRel: 0,
       prunedByBound: true
+    };
+
+    const pruneReasonDetails = lpBound.reason === 'LP_INFEASIBLE'
+      ? 'Continuous LP relaxation was infeasible'
+      : `LP upper bound on improvement ΔJ_max = ${lpBound.maxPossibleImprovement.toFixed(6)} < threshold ${lpBound.effectiveThreshold.toFixed(6)}`;
+
+    candidate.rejectionReason = {
+      code: 'LP_PRUNED',
+      details: pruneReasonDetails
     };
 
     return {
@@ -157,9 +175,12 @@ export function simulateCandidate(baseState, candidate, baselineSolve = null, op
       pruned: true,
       pruneStage: 'stage2_lp_bound',
       pruneReason: lpBound.reason,
+      rejectionReason: candidate.rejectionReason,
       lowerBound: lpBound.lowerBound,
       maxPossibleImprovement: lpBound.maxPossibleImprovement,
       relaxationGap: 0,
+      integralityGapAbs: 0,
+      integralityGapRel: 0,
       objectiveBefore: baseSolve.objective,
       objectiveAfter: lpBound.lowerBound,
       objectiveImprovement: lpBound.maxPossibleImprovement,
@@ -188,36 +209,7 @@ export function simulateCandidate(baseState, candidate, baselineSolve = null, op
   const clonedState = cloneState(baseState);
   applyCandidateToState(clonedState, candidate);
 
-  // Debug: Verify state mutation was applied (only on failure)
-  if (candidate.type === 'RESTOCK') {
-    const mutatedIng = clonedState.ingredients?.find(i =>
-      i.id === candidate.ingredientId || i.name === candidate.ingredientName
-    );
-    if (mutatedIng && mutatedIng.availability !== candidate.to) {
-      console.error(`State mutation failed for ${candidate.ingredientName}: expected ${candidate.to}, got ${mutatedIng.availability}`);
-    } else if (!mutatedIng) {
-      console.error(`State mutation failed for ${candidate.ingredientName}: ingredient not found in cloned state`);
-    }
-  } else if (candidate.type === 'INCREASE_CAPACITY' || candidate.type === 'REDUCE_CAPACITY') {
-    const mutatedIng = clonedState.ingredients?.find(i =>
-      i.id === candidate.ingredientId || i.name === candidate.ingredientName
-    );
-    if (mutatedIng && mutatedIng.maxServings !== Number(candidate.to)) {
-      console.error(`State mutation failed for ${candidate.ingredientName}: expected ${candidate.to}, got ${mutatedIng.maxServings}`);
-    } else if (!mutatedIng) {
-      console.error(`State mutation failed for ${candidate.ingredientName}: ingredient not found in cloned state`);
-    }
-  }
-
   const candSolve = solveModel(clonedState, { validate: false, relaxIntegrality: false });
-
-  // Debug: Log if exact solve failed (only on failure)
-  if (!candSolve || !candSolve.feasible) {
-    console.warn(`Stage 3 exact solve failed for candidate: ${candidate.ingredientName}`);
-    if (candSolve?.errors) {
-      console.warn(`  Errors:`, candSolve.errors);
-    }
-  }
   const macros = ['calories', 'protein', 'carbs', 'fat'];
 
   // Handle infeasible exact solve
@@ -227,16 +219,26 @@ export function simulateCandidate(baseState, candidate, baselineSolve = null, op
       feasible: false,
       objective: Infinity,
       exactImprovement: -Infinity,
+      integralityGapAbs: Infinity,
+      integralityGapRel: Infinity,
       prunedByBound: false
+    };
+
+    candidate.rejectionReason = {
+      code: 'EXACT_INFEASIBLE',
+      details: 'Stage 3 exact discrete MILP solve was infeasible'
     };
 
     return {
       candidate,
       feasible: false,
       pruned: false,
+      rejectionReason: candidate.rejectionReason,
       lowerBound: lpBound.lowerBound,
       maxPossibleImprovement: lpBound.maxPossibleImprovement,
       relaxationGap: Infinity,
+      integralityGapAbs: Infinity,
+      integralityGapRel: Infinity,
       objectiveBefore: baseSolve.objective,
       objectiveAfter: Infinity,
       objectiveImprovement: -Infinity,
@@ -265,30 +267,22 @@ export function simulateCandidate(baseState, candidate, baselineSolve = null, op
   const objBefore = baseSolve.objective;
   const objAfter = candSolve.objective;
   const objImprovement = objBefore - objAfter;
-  const relaxationGap = Math.max(0, objAfter - lpBound.lowerBound);
+  const integralityGapAbs = Math.max(0, objAfter - lpBound.lowerBound);
+  const integralityGapRel = integralityGapAbs / Math.max(Math.abs(objAfter), PRECISION.NUMERICAL_ZERO_EPS);
 
   candidate.stage3 = {
     evaluated: true,
     feasible: true,
     objective: objAfter,
     exactImprovement: objImprovement,
-    relaxationGap
+    relaxationGap: integralityGapAbs,
+    integralityGapAbs,
+    integralityGapRel
   };
 
   // Macro deviations and improvements
   const baseDevs = baseSolve.result?.deviations || {};
   const candDevs = candSolve.result?.deviations || {};
-
-  // Debug: Check if deviations are actually different
-  const devKeys = Object.keys(baseDevs);
-  if (devKeys.length > 0) {
-    const sameDeviations = devKeys.every(m =>
-      Math.abs((baseDevs[m]?.absolute ?? 0) - (candDevs[m]?.absolute ?? 0)) < 1e-6
-    );
-    if (sameDeviations) {
-      console.warn(`Candidate ${candidate.ingredientName} produced identical deviations to baseline`);
-    }
-  }
 
   const macroMetrics = {};
   const normImprovements = {};
@@ -346,7 +340,9 @@ export function simulateCandidate(baseState, candidate, baselineSolve = null, op
     pruned: false,
     lowerBound: lpBound.lowerBound,
     maxPossibleImprovement: lpBound.maxPossibleImprovement,
-    relaxationGap,
+    relaxationGap: integralityGapAbs,
+    integralityGapAbs,
+    integralityGapRel,
     objectiveBefore: objBefore,
     objectiveAfter: objAfter,
     objectiveImprovement: objImprovement,

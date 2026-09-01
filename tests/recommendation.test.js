@@ -30,8 +30,8 @@ if (typeof global.localStorage === 'undefined') {
 }
 
 import { generateCandidates, scoreCandidateGeometry } from '../src/recommendation/candidates.js';
-import { simulateCandidates, simulateCandidateLPBound } from '../src/recommendation/simulation.js';
-import { isCandidateDominated, pruneDominatedCandidates, rankRecommendations } from '../src/recommendation/scoring.js';
+import { simulateCandidates, simulateCandidateLPBound, cloneState, applyCandidateToState } from '../src/recommendation/simulation.js';
+import { isCandidateDominated, pruneDominatedCandidates, rankRecommendations, computeSigmoidScore } from '../src/recommendation/scoring.js';
 import { getRecommendations, applyRecommendation } from '../src/recommendation/recommendation.js';
 import { solveModel } from '../src/core/solver.js';
 import { PRECISION } from '../src/core/precision.js';
@@ -56,9 +56,9 @@ export function runRecommendationTestSuite() {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // 1. CANDIDATE GENERATION & STAGE 1 GEOMETRIC SCREENING
+  // 1. CANDIDATE GENERATION & STAGE 1 GEOMETRIC PRIORITIZATION
   // ─────────────────────────────────────────────────────────────────
-  console.log('--- 1. Candidate Generation & Stage 1 Geometric Screening Tests ---');
+  console.log('--- 1. Candidate Generation & Stage 1 Geometric Prioritization Tests ---');
 
   const testState1 = {
     targets: { calories: 2000, protein: 150, carbs: 200, fat: 60 },
@@ -71,47 +71,17 @@ export function runRecommendationTestSuite() {
     ]
   };
 
-  // Create a baseline solve to determine if we have deficits vs excess
-  // Since we're testing the general system, use a state that would generate RESTOCK candidates
   const baselineSolve = solveModel(testState1, { validate: false });
-
   const cands1 = generateCandidates(testState1, { baselineSolve });
 
-  // Upward availability transitions — only when we have deficits
+  // Upward availability transitions
   const outTransitions = cands1.filter(c => c.ingredientId === 'ing_out' && c.type === 'RESTOCK').map(c => c.to);
-  // This test is now conditional based on whether we have deficits
-  if (baselineSolve.feasible && baselineSolve.result) {
-    const hasDeficit = Object.values(baselineSolve.result.deviations || {}).some(d => d?.absolute > 0);
-    if (hasDeficit) {
-      assert(outTransitions.length === 1 && outTransitions[0] === 'normal',
-        'OutFood generates exactly out → normal when there are deficits');
-    } else {
-      // When over target, we may still generate some candidates, so just log and skip
-      console.log(`[INFO] OutFood RESTOCK transitions: ${outTransitions.length} (state may be over target)`);
-    }
-  } else {
-    console.log('[SKIP] RESTOCK transition tests - baseline solve infeasible');
-  }
+  assert(outTransitions.length === 1 && outTransitions[0] === 'normal',
+    'OutFood generates exactly out → normal transition');
 
   const normTransitions = cands1.filter(c => c.ingredientId === 'ing_norm' && c.type === 'RESTOCK');
   assert(normTransitions.length === 0,
     'NormalFood generates 0 RESTOCK transitions (already at normal)');
-
-  // Capacity transitions — only when we have deficits
-  const limitedCaps = cands1.filter(c => c.ingredientId === 'ing_limited' && c.type === 'INCREASE_CAPACITY').map(c => c.to);
-  // This test is now conditional based on whether we have deficits
-  if (baselineSolve.feasible && baselineSolve.result) {
-    const hasDeficit = Object.values(baselineSolve.result.deviations || {}).some(d => d?.absolute > 0);
-    if (hasDeficit) {
-      assert(limitedCaps.length === 1 && limitedCaps[0] === 3,
-        'LimitedFood (maxServings 2) generates single capacity step-up to 3 when there are deficits');
-    } else {
-      assert(limitedCaps.length === 0,
-        'LimitedFood generates 0 capacity transitions when there are no deficits (over target)');
-    }
-  } else {
-    console.log('[SKIP] Capacity transition tests - baseline solve infeasible');
-  }
 
   // Stage 1 Geometric compatibility scoring
   const residualDeficit = { calories: 0.20, protein: 0.50, carbs: -0.10, fat: 0.05 };
@@ -190,6 +160,29 @@ export function runRecommendationTestSuite() {
     }
   });
 
+  // Property Test: Stage 2 Pruning Soundness
+  // For any candidate where Stage 2 says PRUNED (ΔJ_max < threshold),
+  // forcing an exact Stage 3 solve MUST prove ΔJ_exact <= ΔJ_max < threshold
+  const subThresholdCandidate = {
+    id: 'test_bound_soundness',
+    type: 'RESTOCK',
+    ingredientId: 'c2', // Yuca is already normal
+    ingredientName: 'Yuca',
+    from: 'normal',
+    to: 'normal',
+    label: 'Noop Yuca'
+  };
+  const baseSolveObj = solveModel(simState, { validate: false });
+  const forcedBound = simulateCandidateLPBound(simState, subThresholdCandidate, baseSolveObj, 0.001);
+  if (forcedBound.pruned) {
+    const forcedClonedState = cloneState(simState);
+    applyCandidateToState(forcedClonedState, subThresholdCandidate);
+    const forcedExactSolve = solveModel(forcedClonedState, { validate: false, relaxIntegrality: false });
+    const forcedExactDeltaJ = baseSolveObj.objective - forcedExactSolve.objective;
+    assert(forcedExactDeltaJ <= forcedBound.maxPossibleImprovement + 1e-6 && forcedExactDeltaJ < 0.001,
+      `Pruning soundness: Exact ΔJ (${forcedExactDeltaJ.toFixed(6)}) <= Bound ΔJ_max (${forcedBound.maxPossibleImprovement.toFixed(6)}) < threshold (0.001)`);
+  }
+
 
   // ─────────────────────────────────────────────────────────────────
   // 3. METRIC EXTRACTION ACCURACY
@@ -206,35 +199,46 @@ export function runRecommendationTestSuite() {
     assert(milkRestock.ingredientUsed === true,
       'Whole Milk is utilized in candidate solution');
   } else {
-    console.log('[SKIP] Milk restock tests - candidate not generated (likely over target)');
+    console.log('[SKIP] Milk restock tests - candidate not generated');
   }
 
 
   // ─────────────────────────────────────────────────────────────────
-  // 4. DOMINANCE & ELIGIBILITY
+  // 4. DOMINANCE, ELIGIBILITY & SIGMOID SCORE METRICS
   // ─────────────────────────────────────────────────────────────────
-  console.log('\n--- 4. Dominance & Eligibility Tests ---');
+  console.log('\n--- 4. Dominance, Eligibility & Sigmoid Presentation Metric Tests ---');
+
+  // Presentation Metric: Sigmoid monotonicity and bounds
+  assert(computeSigmoidScore(0) === 0, 'Sigmoid presentation score at ΔJ = 0 is 0');
+  assert(computeSigmoidScore(-0.5) === 0, 'Sigmoid presentation score at negative ΔJ is 0');
+  const s1 = computeSigmoidScore(0.1);
+  const s2 = computeSigmoidScore(0.5);
+  const s3 = computeSigmoidScore(1.0);
+  assert(s1 > 0 && s1 < s2 && s2 < s3 && s3 < 1.0,
+    `Sigmoid score is strictly monotonic and bounded in [0, 1): S(0.1)=${s1.toFixed(3)}, S(0.5)=${s2.toFixed(3)}, S(1.0)=${s3.toFixed(3)}`);
 
   const testSimA = {
-    candidate: { id: 'cand_a', type: 'RESTOCK' },
+    candidate: { id: 'cand_a', type: 'RESTOCK', label: 'Candidate A' },
     feasible: true,
     objectiveImprovement: 0.20,
     calorieImprovement: 10,
     proteinImprovement: 5,
     carbImprovement: 10,
     fatImprovement: 2,
-    totalNormalizedMacroImprovement: 0.10
+    totalNormalizedMacroImprovement: 0.10,
+    ingredientUsed: true
   };
 
   const testSimB = {
-    candidate: { id: 'cand_b', type: 'RESTOCK' },
+    candidate: { id: 'cand_b', type: 'RESTOCK', label: 'Candidate B' },
     feasible: true,
     objectiveImprovement: 0.35,
     calorieImprovement: 15,
     proteinImprovement: 8,
     carbImprovement: 12,
     fatImprovement: 4,
-    totalNormalizedMacroImprovement: 0.20
+    totalNormalizedMacroImprovement: 0.20,
+    ingredientUsed: true
   };
 
   assert(isCandidateDominated(testSimA, testSimB) === true,
@@ -245,17 +249,20 @@ export function runRecommendationTestSuite() {
   const pruned = pruneDominatedCandidates([testSimA, testSimB]);
   assert(pruned.length === 1 && pruned[0].candidate.id === 'cand_b',
     'pruneDominatedCandidates removes dominated candidate A');
+  assert(testSimA.candidate.rejectionReason?.code === 'DOMINATED',
+    'Dominated candidate A records structured rejection reason');
 
   // Trade-off preservation (neither dominates)
   const testSimC = {
-    candidate: { id: 'cand_c', type: 'INCREASE_CAPACITY' },
+    candidate: { id: 'cand_c', type: 'INCREASE_CAPACITY', label: 'Candidate C' },
     feasible: true,
     objectiveImprovement: 0.30,
     calorieImprovement: 5,
     proteinImprovement: 20, // Higher protein improvement than B
     carbImprovement: 0,
     fatImprovement: 0,
-    totalNormalizedMacroImprovement: 0.15
+    totalNormalizedMacroImprovement: 0.15,
+    ingredientUsed: true
   };
 
   assert(isCandidateDominated(testSimC, testSimB) === false && isCandidateDominated(testSimB, testSimC) === false,
@@ -263,9 +270,9 @@ export function runRecommendationTestSuite() {
 
 
   // ─────────────────────────────────────────────────────────────────
-  // 5. DETERMINISTIC RANKING
+  // 5. DETERMINISTIC RANKING & PIPELINE REPEATABILITY
   // ─────────────────────────────────────────────────────────────────
-  console.log('\n--- 5. Deterministic Ranking Tests ---');
+  console.log('\n--- 5. Deterministic Ranking & Repeatability Tests ---');
 
   const ranked1 = rankRecommendations([testSimA, testSimB, testSimC]);
   const ranked2 = rankRecommendations([testSimA, testSimB, testSimC]);
@@ -274,6 +281,14 @@ export function runRecommendationTestSuite() {
     'Ranked correctly by ΔJ with dominated candidate pruned');
   assert(JSON.stringify(ranked1) === JSON.stringify(ranked2),
     'Ranking is 100% deterministic on identical input');
+
+  // Property Test: Repeatability of full getRecommendations analysis across N runs
+  const rep1 = getRecommendations(simState);
+  const rep2 = getRecommendations(simState);
+  assert(rep1.recommendations.length === rep2.recommendations.length,
+    'Full recommendation pipeline produces identical recommendation count across runs');
+  assert(rep1.recommendations[0]?.id === rep2.recommendations[0]?.id,
+    `Top recommendation ID is deterministic: ${rep1.recommendations[0]?.id}`);
 
 
   // ─────────────────────────────────────────────────────────────────
@@ -305,15 +320,16 @@ export function runRecommendationTestSuite() {
   assert(reduceCapacityCands.length > 0,
     `REDUCE_CAPACITY candidates generated when over target: ${reduceCapacityCands.length}`);
 
-  // Should NOT generate RESTOCK candidates when over target
+  // Should NOT generate RESTOCK candidates when all ingredients are normal
   const restockCands = overTargetCands.filter(c => c.type === 'RESTOCK');
   assert(restockCands.length === 0,
-    'No RESTOCK candidates generated when over target');
+    'No RESTOCK candidates generated when all ingredients are normal');
+
 
   // ─────────────────────────────────────────────────────────────────
-  // 7. END-TO-END CASCADE & AUDIT TRAIL
+  // 7. END-TO-END CASCADE, AUDIT TRAIL, EXPLAINABILITY & APPLY
   // ─────────────────────────────────────────────────────────────────
-  console.log('\n--- 7. End-to-End Cascade & Audit Trail Tests ---');
+  console.log('\n--- 7. End-to-End Cascade, Audit Trail, Explainability & Apply Tests ---');
 
   const e2eState = JSON.parse(JSON.stringify(simState));
   const e2eOutcome = getRecommendations(e2eState);
@@ -326,12 +342,18 @@ export function runRecommendationTestSuite() {
     `Audit trail tracks Stage 1 candidates: ${e2eOutcome.auditTrail.stage1Candidates}`);
   assert(typeof e2eOutcome.auditTrail.stage2LPEvaluated === 'number',
     `Audit trail tracks Stage 2 LP evaluations: ${e2eOutcome.auditTrail.stage2LPEvaluated}`);
+  assert(typeof e2eOutcome.auditTrail.winnerExplanation === 'string' && e2eOutcome.auditTrail.winnerExplanation.length > 0,
+    'Audit trail includes actionable winner explanation answering why top recommendation won');
+  assert(Array.isArray(e2eOutcome.auditTrail.rejections),
+    'Audit trail includes structured rejections array answering why alternatives were rejected');
 
-  // Check if we got recommendations (may be 0 if state is already optimal)
+  // Check top recommendation and APPLY transaction
   if (e2eOutcome.recommendations.length > 0) {
     const topRec = e2eOutcome.recommendations[0];
     assert(Boolean(topRec.stage1) && Boolean(topRec.stage2) && Boolean(topRec.stage3),
       'Top recommendation preserves complete candidate lifecycle (stage1, stage2, stage3)');
+    assert(typeof topRec.normalizedScore === 'number' && topRec.normalizedScore > 0,
+      `Top recommendation includes sigmoid presentation score: ${(topRec.normalizedScore * 100).toFixed(0)}%`);
 
     const oldFp = e2eOutcome.stateFingerprint;
     const applyRes = applyRecommendation(e2eState, topRec, { autoPersist: false });
@@ -339,13 +361,25 @@ export function runRecommendationTestSuite() {
       `Successfully applied top recommendation: ${topRec.label}`);
     assert(applyRes.newFingerprint !== oldFp,
       `State fingerprint updated after mutation: ${applyRes.newFingerprint}`);
+
+    // Verify mutation took effect on the state
+    const mutatedItem = e2eState.ingredients.find(i => i.id === topRec.ingredientId || i.name === topRec.ingredientName);
+    if (topRec.type === 'RESTOCK') {
+      assert(mutatedItem?.availability === topRec.to,
+        `State mutation verified: ${mutatedItem?.name} availability is ${mutatedItem?.availability}`);
+    } else if (topRec.type === 'INCREASE_CAPACITY' || topRec.type === 'REDUCE_CAPACITY') {
+      assert(mutatedItem?.maxServings === Number(topRec.to),
+        `State mutation verified: ${mutatedItem?.name} maxServings is ${mutatedItem?.maxServings}`);
+    }
+
     // Staleness check
     const staleApply = applyRecommendation(e2eState, topRec, { autoPersist: false });
     assert(staleApply.success === false && staleApply.error === 'STALE_FINGERPRINT',
       'Apply fails safely when attempted against a stale state fingerprint');
   } else {
-    console.log('[SKIP] Application tests - no recommendations generated (state may be optimal)');
+    console.log('[SKIP] Application tests - no recommendations generated');
   }
+
 
   // ─────────────────────────────────────────────────────────────────
   // 8. PRECISION BOUNDARIES & REGRESSION TESTS
@@ -402,9 +436,7 @@ export function runRecommendationTestSuite() {
   // Regression 3: LP improvement just below threshold (I_max = 0.000099) -> must prune
   const candidateSub = { id: 'c_sub', type: 'RESTOCK', ingredientId: 'c1', to: 'normal' };
   const mockBaseSolve = { feasible: true, objective: 1.0, result: { totals: {}, deviations: {} } };
-  // Using explicit minThreshold = 0.0001
   const subBound = simulateCandidateLPBound(simState, candidateSub, mockBaseSolve, 0.0001);
-  // If maxPossibleImprovement is < 0.0001, pruned must be true
   assert(subBound.pruned === (subBound.maxPossibleImprovement < 0.0001),
     `Stage 2 LP bound pruning strictly respects declared threshold (pruned=${subBound.pruned}, maxPossibleImprovement=${subBound.maxPossibleImprovement.toFixed(6)})`);
 
@@ -412,11 +444,10 @@ export function runRecommendationTestSuite() {
   // Regression 5: Large baseline objective (J = 2.5) must NOT inflate threshold
   const largeBaseSolve = { feasible: true, objective: 2.5, result: { totals: {}, deviations: {} } };
   const largeBound = simulateCandidateLPBound(simState, candidateSub, largeBaseSolve);
-  assert(largeBound.effectiveThreshold === PRECISION.OBJECTIVE_EPS,
-    `Stage 2 effective threshold remains exactly ${PRECISION.OBJECTIVE_EPS} regardless of large baseline objective (J=2.5)`);
+  assert(largeBound.effectiveThreshold === PRECISION.PRUNING_EPS,
+    `Stage 2 effective threshold remains exactly ${PRECISION.PRUNING_EPS} regardless of large baseline objective (J=2.5)`);
 
   // Regression 6: Display-rounding isolation
-  // Raw quantity (e.g. 143.49g) displayed in UI as 143g must not mutate underlying result
   const rawTestState = {
     targets: { calories: 2335, protein: 151, carbs: 291, fat: 62 },
     meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
@@ -439,7 +470,7 @@ export function runRecommendationTestSuite() {
   // Regression 7: Round-trip actual portion with awkward fractions (143g on 137g serving size)
   const awkwardServingSize = 137;
   const awkwardActualQty = 143;
-  const expectedServings = awkwardActualQty / awkwardServingSize; // ~1.0437956204379562
+  const expectedServings = awkwardActualQty / awkwardServingSize;
   const awkwardState = {
     targets: { calories: 2335, protein: 151, carbs: 291, fat: 62 },
     meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],

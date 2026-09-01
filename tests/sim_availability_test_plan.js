@@ -231,7 +231,7 @@ export function buildAndSolveModel({
   return { raw, model };
 }
 
-export function extractResults({ raw, targets, meals, ingredients, formulation }) {
+export function extractResults({ raw, targets, meals, ingredients, _formulation }) {
   if (!raw || !raw.feasible) {
     return { feasible: false, objective: raw?.result || Infinity };
   }

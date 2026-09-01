@@ -12,6 +12,27 @@ const ACTION_TYPE_PRIORITY = {
 };
 
 /**
+ * Presentation Metric (UI layer only):
+ * Computes a smooth monotonic presentation score in [0, 1] from raw objective improvement ΔJ.
+ * Uses S(ΔJ) = tanh(k * ΔJ / 2) for ΔJ >= 0.
+ *
+ * Optimization Contract:
+ *   - Raw ΔJ strictly drives ranking, pruning, and dominance.
+ *   - Sigmoid score is strictly for UI presentation and human readability.
+ *
+ * @param {number} deltaJ - Raw objective improvement.
+ * @param {number} [k=5.0] - Scaling factor for visual score normalization.
+ * @returns {number} Presentation score in [0, 1].
+ */
+export function computeSigmoidScore(deltaJ, k = 5.0) {
+  if (typeof deltaJ !== 'number' || isNaN(deltaJ) || deltaJ <= 0) {
+    return 0;
+  }
+  const score = Math.tanh((k * deltaJ) / 2);
+  return Math.max(0, Math.min(1, score));
+}
+
+/**
  * Checks whether a simulation result is eligible for recommendation.
  * Requires the candidate to actually be utilized in the solution and to provide
  * meaningful improvement (avoiding fractional LP penalty jitter).
@@ -25,9 +46,14 @@ export function isCandidateEligible(simResult) {
   }
 
   // 1. The ingredient must actually be used in the meal plan (if evaluated)
-  // For capacity reductions, the ingredient might not be used in the new solution but still provides value
   if (simResult.ingredientUsed === false &&
       !['INCREASE_CAPACITY', 'REDUCE_CAPACITY'].includes(simResult.candidate?.type)) {
+    if (simResult.candidate && !simResult.candidate.rejectionReason) {
+      simResult.candidate.rejectionReason = {
+        code: 'UNUTILIZED',
+        details: 'Ingredient was not utilized in the solved meal plan (0 servings)'
+      };
+    }
     return false;
   }
 
@@ -45,10 +71,24 @@ export function isCandidateEligible(simResult) {
   // For capacity modifications, use capacity threshold
   if (['INCREASE_CAPACITY', 'REDUCE_CAPACITY'].includes(simResult.candidate?.type)) {
     const improvesObjectiveCapacity = (simResult.objectiveImprovement || 0) >= PRECISION.OBJECTIVE_CAPACITY_EPS;
-    return improvesObjectiveCapacity || improvesMacros || improvesAnyMacroDirect;
+    const eligibleCap = improvesObjectiveCapacity || improvesMacros || improvesAnyMacroDirect;
+    if (!eligibleCap && simResult.candidate && !simResult.candidate.rejectionReason) {
+      simResult.candidate.rejectionReason = {
+        code: 'SUB_THRESHOLD',
+        details: `Objective improvement ΔJ = ${(simResult.objectiveImprovement || 0).toFixed(6)} < capacity threshold ${PRECISION.OBJECTIVE_CAPACITY_EPS}`
+      };
+    }
+    return eligibleCap;
   }
 
-  return improvesObjective || improvesMacros || improvesAnyMacroDirect;
+  const eligible = improvesObjective || improvesMacros || improvesAnyMacroDirect;
+  if (!eligible && simResult.candidate && !simResult.candidate.rejectionReason) {
+    simResult.candidate.rejectionReason = {
+      code: 'SUB_THRESHOLD',
+      details: `Objective improvement ΔJ = ${(simResult.objectiveImprovement || 0).toFixed(6)} < threshold ${PRECISION.OBJECTIVE_EPS}`
+    };
+  }
+  return eligible;
 }
 
 
@@ -112,6 +152,7 @@ export function isCandidateDominated(simA, simB) {
 
 /**
  * Prunes dominated candidates from a collection of candidate simulation results.
+ * Attaches structured rejection reasons to dominated candidates.
  * @param {Array<object>} eligibleResults - List of eligible simulation results.
  * @returns {Array<object>} Filtered list with all dominated candidates removed.
  */
@@ -125,18 +166,25 @@ export function pruneDominatedCandidates(eligibleResults) {
   for (let i = 0; i < eligibleResults.length; i++) {
     const candidateA = eligibleResults[i];
     let dominated = false;
+    let dominator = null;
 
     for (let j = 0; j < eligibleResults.length; j++) {
       if (i === j) continue;
       const candidateB = eligibleResults[j];
       if (isCandidateDominated(candidateA, candidateB)) {
         dominated = true;
+        dominator = candidateB;
         break;
       }
     }
 
     if (!dominated) {
       nonDominated.push(candidateA);
+    } else if (candidateA.candidate) {
+      candidateA.candidate.rejectionReason = {
+        code: 'DOMINATED',
+        details: `Mathematically dominated by ${dominator?.candidate?.label || dominator?.candidate?.id}`
+      };
     }
   }
 
@@ -175,7 +223,20 @@ function deduplicateByResult(candidates) {
       const existingTo = typeof existing.candidate?.to === 'number' ? existing.candidate.to : Infinity;
       const currentTo = typeof sim.candidate?.to === 'number' ? sim.candidate.to : Infinity;
       if (currentTo < existingTo) {
+        if (existing.candidate) {
+          existing.candidate.rejectionReason = {
+            code: 'DUPLICATE',
+            details: `Duplicate counterfactual outcome; superseded by minimal action ${sim.candidate?.label || sim.candidate?.id}`
+          };
+        }
         seen.set(key, sim);
+      } else {
+        if (sim.candidate) {
+          sim.candidate.rejectionReason = {
+            code: 'DUPLICATE',
+            details: `Duplicate counterfactual outcome; superseded by minimal action ${existing.candidate?.label || existing.candidate?.id}`
+          };
+        }
       }
     }
   }
@@ -184,11 +245,12 @@ function deduplicateByResult(candidates) {
 
 /**
  * Ranks candidate simulations deterministically and returns the top recommendations.
- * Tie-breaker hierarchy:
+ * Primary ranking is strictly driven by raw objective improvement ΔJ.
+ * Secondary tie-breakers operate only when |ΔJ_b - ΔJ_a| <= OBJECTIVE_COMPARISON_EPS:
  * 1. ΔJ (Objective improvement) descending
  * 2. Total normalized macro improvement descending
- * 3. Action simplicity (RESTOCK < INCREASE_CAPACITY < ADD_INGREDIENT)
- * 4. Deterministic Candidate ID string ascending
+ * 3. Action simplicity (RESTOCK < INCREASE_CAPACITY < REDUCE_CAPACITY < ADD_INGREDIENT)
+ * 4. Deterministic Candidate ID string ascending (terminal key)
  *
  * @param {Array<object>} simulationResults - List of candidate simulation results.
  * @param {object} [options] - Options including limit (default: 10).
@@ -208,26 +270,26 @@ export function rankRecommendations(simulationResults, options = {}) {
 
   // 4. Sort by deterministic tie-breakers
   const ranked = [...deduplicated].sort((a, b) => {
-    // 1. Objective improvement (ΔJ) descending
+    // 1. Primary: Objective improvement (ΔJ) descending
     const diffObj = b.objectiveImprovement - a.objectiveImprovement;
-    if (Math.abs(diffObj) > PRECISION.OBJECTIVE_EPS) {
+    if (Math.abs(diffObj) > PRECISION.OBJECTIVE_COMPARISON_EPS) {
       return diffObj;
     }
 
-    // 2. Total normalized macro improvement descending
+    // 2. Secondary: Total normalized macro improvement descending
     const diffNorm = (b.totalNormalizedMacroImprovement || 0) - (a.totalNormalizedMacroImprovement || 0);
-    if (Math.abs(diffNorm) > PRECISION.OBJECTIVE_EPS) {
+    if (Math.abs(diffNorm) > PRECISION.OBJECTIVE_COMPARISON_EPS) {
       return diffNorm;
     }
 
-    // 3. Action type priority (RESTOCK first, then CAPACITY, then ADD)
+    // 3. Tertiary: Action type priority (RESTOCK first, then CAPACITY, then ADD)
     const prioA = ACTION_TYPE_PRIORITY[a.candidate?.type] || 99;
     const prioB = ACTION_TYPE_PRIORITY[b.candidate?.type] || 99;
     if (prioA !== prioB) {
       return prioA - prioB;
     }
 
-    // 4. Deterministic candidate ID ascending
+    // 4. Quaternary: Deterministic candidate ID ascending
     const idA = String(a.candidate?.id || '');
     const idB = String(b.candidate?.id || '');
     return idA.localeCompare(idB);

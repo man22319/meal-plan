@@ -112,7 +112,9 @@ export function generateCandidates(state, options = {}) {
   // Materiality threshold: distinguish actionable gaps from numerical noise
   const hasDeficit = Object.values(residualDeficit).some(v => v > PRECISION.MACRO_MATERIALITY_EPS);
   const hasExcess = Object.values(residualDeficit).some(v => v < -PRECISION.MACRO_MATERIALITY_EPS);
-  const isImprovable = hasDeficit || hasExcess || !baselineSolve?.feasible;
+  const hasMealDeviations = baselineSolve?.result?.mealResults?.some(m => Math.abs(m.calDeviation || 0) > 0.5) ?? false;
+  const hasObjectiveOpportunity = (baselineSolve?.objective ?? Infinity) > PRECISION.OBJECTIVE_EPS;
+  const isImprovable = !baselineSolve || !baselineSolve.feasible || hasDeficit || hasExcess || hasMealDeviations || hasObjectiveOpportunity;
 
   // 1. Availability Upgrades (RESTOCK) — emit maximal target (→ normal)
   // Generate RESTOCK whenever state is improvable (deficits, excesses that can be rebalanced, or infeasibility)
@@ -148,8 +150,8 @@ export function generateCandidates(state, options = {}) {
   }
 
   // 2. Capacity Expansions (INCREASE_CAPACITY)
-  // Generate when we have deficits or infeasibility (need more capacity to meet targets)
-  if (hasDeficit || !baselineSolve?.feasible) {
+  // Generate when we have deficits, infeasibility, or optimization opportunities
+  if (isImprovable && (hasDeficit || !baselineSolve?.feasible || hasMealDeviations)) {
     const usageMap = new Map();
     if (baselineSolve && Array.isArray(baselineSolve.result?.mealResults)) {
       baselineSolve.result.mealResults.forEach(m => {
@@ -171,8 +173,7 @@ export function generateCandidates(state, options = {}) {
 
       if (currentMax >= 10) return;
 
-      // Binding constraint heuristic filter: prioritize ingredients actively binding / near cap
-      // Relaxed: only filter if usage is very low (< 10% of capacity) to allow more candidates
+      // Prioritize ingredients actively used in the plan
       if (baselineSolve && baselineSolve.feasible) {
         const ingKey = ing.id || ing.name;
         const usage = usageMap.get(ingKey) || 0;
@@ -185,7 +186,10 @@ export function generateCandidates(state, options = {}) {
         }
       }
 
-      const targetMax = Math.min(Math.ceil(currentMax * 1.5), 10);
+      let targetMax = Math.min(Math.ceil(currentMax * 1.5), 10);
+      if (targetMax <= currentMax) {
+        targetMax = Math.min(currentMax + 1, 10);
+      }
       if (targetMax <= currentMax) return;
 
       const ingId = ing.id || ing.name;
@@ -211,14 +215,11 @@ export function generateCandidates(state, options = {}) {
         }
       });
     });
-  } else {
-    console.log('Skipping INCREASE_CAPACITY candidates (hasDeficit = false)');
   }
 
   // 3. Reduction Candidates (when over target)
   if (hasExcess) {
-    console.log('Generating REDUCE_CAPACITY candidates (hasExcess = true)');
-    // 3a. Reduce max servings for ingredients that are currently used and contribute to excess
+    // Reduce max servings for ingredients that are currently used and contribute to excess
     const usageMap = new Map();
     const ingredientCalories = new Map();
 
@@ -233,7 +234,6 @@ export function generateCandidates(state, options = {}) {
       });
     }
 
-    let reduceCount = 0;
     ingredients.forEach(ing => {
       const avail = resolveAvailability(ing.availability);
       if (avail === 'out') return;
@@ -258,7 +258,6 @@ export function generateCandidates(state, options = {}) {
       const ingId = ing.id || ing.name;
       const geom = scoreCandidateGeometry(ing, residualDeficit, targets, weights);
 
-      reduceCount++;
       candidates.push({
         id: `reduce_${ingId}_${targetMax}`,
         type: 'REDUCE_CAPACITY',
@@ -279,16 +278,9 @@ export function generateCandidates(state, options = {}) {
         }
       });
     });
-
-    console.log(`Generated ${reduceCount} REDUCE_CAPACITY candidates`);
-
-    // 3b. Skip availability reductions - they're mostly ineffective
-    // Only use capacity reductions which actually constrain the solver
-  } else {
-    console.log('Skipping REDUCE_CAPACITY candidates (hasExcess = false)');
   }
 
-  // 4. Pool Ingredient Additions (ADD_INGREDIENT) — Stage 1 Heuristic Candidate Reduction
+  // 4. Pool Ingredient Additions (ADD_INGREDIENT) — Stage 1 Heuristic Prioritization
   const candidatePool = options.candidatePool || options.candidateIngredients || [];
   if (Array.isArray(candidatePool) && candidatePool.length > 0) {
     const activeNames = new Set(ingredients.map(i => i.name.trim().toLowerCase()));
@@ -323,8 +315,12 @@ export function generateCandidates(state, options = {}) {
       });
     });
 
-    // Stage 1 Selection: sort by composite geometric score descending
-    scoredPool.sort((a, b) => b.geom.geometricScore - a.geom.geometricScore);
+    // Stage 1 Heuristic Prioritization: sort by composite geometric score descending, tie-broken by ID
+    scoredPool.sort((a, b) => {
+      const diff = b.geom.geometricScore - a.geom.geometricScore;
+      if (Math.abs(diff) > PRECISION.NUMERICAL_ZERO_EPS) return diff;
+      return a.ingId.localeCompare(b.ingId);
+    });
 
     const poolLimit = typeof options.poolLimit === 'number' && options.poolLimit > 0
       ? options.poolLimit
@@ -332,7 +328,7 @@ export function generateCandidates(state, options = {}) {
 
     const selectedPool = scoredPool.slice(0, poolLimit);
 
-    selectedPool.forEach(({ candidateData, ingId, poolIng, geom }) => {
+    selectedPool.forEach(({ candidateData, ingId, poolIng, geom }, pIdx) => {
       candidates.push({
         id: `add_${ingId}`,
         type: 'ADD_INGREDIENT',
@@ -350,6 +346,7 @@ export function generateCandidates(state, options = {}) {
           directionalMagnitude: geom.directionalMagnitude,
           cosineAlignment: geom.cosineAlignment,
           geometricScore: geom.geometricScore,
+          priorityRank: pIdx + 1,
           passed: true
         }
       });

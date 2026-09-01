@@ -1135,9 +1135,6 @@ export const UI = {
     const t0 = performance.now();
 
     try {
-      // Add debug logging to understand why candidates might not be generated
-      console.log('Starting recommendation analysis with state:', state);
-
       const outcome = await getRecommendationsAsync(state, {
         limit: 10,
         onProgress(done, total) {
@@ -1145,66 +1142,65 @@ export const UI = {
         }
       });
 
-      console.log('Recommendation analysis outcome:', outcome);
-
       const elapsed = (performance.now() - t0).toFixed(1);
 
-      logLines.push(`=== RECOMMENDATION OPTIMIZATION CASCADE ===`);
-      logLines.push(`State Fingerprint: ${outcome.stateFingerprint}`);
-      logLines.push(`Baseline Feasible: ${outcome.baselineSummary.feasible}, J_B: ${outcome.baselineSummary.objective?.toFixed(6) ?? 'N/A'}`);
+      logLines.push(`══════════════════════════════════════════════════════════════`);
+      logLines.push(` RECOMMENDATION OPTIMIZATION CASCADE AUDIT TRAIL              `);
+      logLines.push(`══════════════════════════════════════════════════════════════\n`);
+      logLines.push(`[1] BASELINE STATE & OPTIMIZATION CONTEXT:`);
+      logLines.push(`    State Fingerprint: ${outcome.stateFingerprint}`);
+      logLines.push(`    Baseline Feasibility: ${outcome.baselineSummary.feasible ? 'FEASIBLE' : 'INFEASIBLE'}`);
+      logLines.push(`    Baseline Objective (J_B): ${outcome.baselineSummary.objective?.toFixed(6) ?? 'N/A'}`);
       if (outcome.baselineSummary.totals) {
         const t = outcome.baselineSummary.totals;
         const tgts = state.targets || { calories: 2000, protein: 150, carbs: 200, fat: 60 };
-        logLines.push(`Baseline Totals: kcal=${Math.round(t.calories || 0)} P=${(t.protein || 0).toFixed(1)}g C=${(t.carbs || 0).toFixed(1)}g F=${(t.fat || 0).toFixed(1)}g`);
-        logLines.push(`Target Totals:  kcal=${tgts.calories} P=${tgts.protein}g C=${tgts.carbs}g F=${tgts.fat}g`);
+        logLines.push(`    Current Totals:  kcal=${Math.round(t.calories || 0)} | P=${(t.protein || 0).toFixed(1)}g | C=${(t.carbs || 0).toFixed(1)}g | F=${(t.fat || 0).toFixed(1)}g`);
+        logLines.push(`    Target Totals:   kcal=${tgts.calories} | P=${tgts.protein}g | C=${tgts.carbs}g | F=${tgts.fat}g`);
       }
       if (outcome.baselineSummary.deviations) {
         const d = outcome.baselineSummary.deviations;
-        logLines.push(`Baseline Deviations: kcal=${d.calories?.absolute?.toFixed(1)} P=${d.protein?.absolute?.toFixed(1)}g C=${d.carbs?.absolute?.toFixed(1)}g F=${d.fat?.absolute?.toFixed(1)}g`);
+        logLines.push(`    Macro Deviations: kcal=${d.calories?.absolute?.toFixed(1)} | P=${d.protein?.absolute?.toFixed(1)}g | C=${d.carbs?.absolute?.toFixed(1)}g | F=${d.fat?.absolute?.toFixed(1)}g`);
       }
-      logLines.push(`---`);
-      logLines.push(`STAGE 1: Heuristic Screening`);
-      logLines.push(`  Candidates Generated: ${outcome.auditTrail?.stage1Candidates ?? outcome.candidatesEvaluated ?? '?'}`);
-      logLines.push(`STAGE 2: Continuous LP Relaxation Bounds`);
-      logLines.push(`  Evaluated: ${outcome.auditTrail?.stage2LPEvaluated ?? '?'}`);
-      logLines.push(`  Provably Pruned (ΔJ_max < threshold): ${outcome.auditTrail?.stage2BoundPruned ?? '0'}`);
-      // Show threshold info from first candidate if available
-      if (outcome.rawSimulations?.[0]?.candidate?.stage2?.effectiveThreshold) {
-        logLines.push(`  Effective Threshold Used: ${outcome.rawSimulations[0].candidate.stage2.effectiveThreshold.toFixed(6)}`);
-      }
-      logLines.push(`STAGE 3: Exact MILP Counterfactuals`);
-      logLines.push(`  Exact Solves Executed: ${outcome.auditTrail?.stage3ExactSolved ?? '?'}`);
-      logLines.push(`  Total Analysis Time: ${elapsed}ms`);
-      logLines.push(`---`);
 
-      // Debug: Show a few raw simulation results to diagnose identical values
-      if (outcome.rawSimulations && outcome.rawSimulations.length > 0) {
-        logLines.push(`DEBUG: First 3 raw simulation results:`);
-        outcome.rawSimulations.slice(0, 3).forEach((sim, idx) => {
-          logLines.push(`  Sim #${idx + 1}: ${sim.candidate?.ingredientName || sim.candidate?.id}`);
-          logLines.push(`    Feasible: ${sim.feasible}, Pruned: ${sim.pruned}, Stage3Eval: ${sim.candidate?.stage3?.evaluated}`);
-          logLines.push(`    ObjBefore: ${sim.objectiveBefore?.toFixed(6)}, ObjAfter: ${sim.objectiveAfter?.toFixed(6)}, ΔJ: ${sim.objectiveImprovement?.toFixed(6)}`);
-          logLines.push(`    CalImprovement: ${sim.calorieImprovement?.toFixed(2)}, ProtImprovement: ${sim.proteinImprovement?.toFixed(2)}`);
-          logLines.push(`    IngredientUsed: ${sim.ingredientUsed}`);
+      logLines.push(`\n[2] PIPELINE EXECUTION SUMMARY:`);
+      logLines.push(`    Stage 1 Candidates Generated: ${outcome.auditTrail?.stage1Candidates ?? outcome.candidatesEvaluated ?? '0'}`);
+      logLines.push(`    Stage 2 Continuous LP Evaluated: ${outcome.auditTrail?.stage2LPEvaluated ?? '0'}`);
+      logLines.push(`    Stage 2 Provably Pruned (ΔJ_max < ε): ${outcome.auditTrail?.stage2BoundPruned ?? '0'}`);
+      logLines.push(`    Stage 3 Exact MILP Solves: ${outcome.auditTrail?.stage3ExactSolved ?? '0'}`);
+      logLines.push(`    Eligible Recommendations: ${outcome.auditTrail?.eligibleRecommendations ?? outcome.recommendations.length}`);
+      logLines.push(`    Cascade Execution Time: ${elapsed} ms`);
+
+      logLines.push(`\n[3] RANKED RECOMMENDATIONS:`);
+      if (outcome.recommendations.length > 0) {
+        outcome.recommendations.forEach((r, i) => {
+          logLines.push(`    #${i + 1} [${r.type}] ${r.label}`);
+          logLines.push(`        Raw ΔJ = +${r.objectiveImprovement.toFixed(6)} | Visual Score: ${Math.round(r.normalizedScore * 100)}% (tanh mapped)`);
+          if (typeof r.lowerBound === 'number') {
+            logLines.push(`        LP Bound (J_LP*): ${r.lowerBound.toFixed(6)} | Integrality Gap: ${(r.integralityGapAbs || 0).toFixed(6)} (${((r.integralityGapRel || 0) * 100).toFixed(2)}%)`);
+          }
+          if (r.stage1?.geometricScore) {
+            logLines.push(`        Stage 1 Geometry: DirMag=${r.stage1.directionalMagnitude.toFixed(4)}, Alignment=${r.stage1.cosineAlignment.toFixed(4)}, Score=${r.stage1.geometricScore.toFixed(4)}`);
+          }
+          logLines.push(`        Macro Deltas: ΔCal=${(r.calorieImprovement || 0).toFixed(1)} kcal, ΔP=${(r.proteinImprovement || 0).toFixed(1)}g, ΔC=${(r.carbImprovement || 0).toFixed(1)}g, ΔF=${(r.fatImprovement || 0).toFixed(1)}g`);
+          logLines.push(`        Ingredient Used: ${r.ingredientUsed} | Meals Improved: ${r.mealsImproved}`);
         });
-        logLines.push(`---`);
+      } else {
+        logLines.push(`    (No eligible recommendations found)`);
       }
 
-      logLines.push(`TOP RECOMMENDATIONS:`);
-      outcome.recommendations.forEach((r, i) => {
-        logLines.push(`#${i + 1} [${r.type}] ${r.label}`);
-        if (typeof r.lowerBound === 'number') {
-          logLines.push(`   LP Lower Bound (J_LP*): ${r.lowerBound.toFixed(6)}, Integrality Gap: ${(r.relaxationGap || 0).toFixed(6)}`);
-        }
-        if (r.stage1?.geometricScore) {
-          logLines.push(`   Stage 1 Geometry: DirMag=${r.stage1.directionalMagnitude.toFixed(4)}, Alignment=${r.stage1.cosineAlignment.toFixed(4)}, Composite=${r.stage1.geometricScore.toFixed(4)}`);
-        }
-        logLines.push(`   Exact ΔJ = +${r.objectiveImprovement.toFixed(6)}`);
-        logLines.push(`   Macro Changes: ΔCal=${(r.calorieImprovement || 0).toFixed(1)} kcal, ΔP=${(r.proteinImprovement || 0).toFixed(1)}g, ΔC=${(r.carbImprovement || 0).toFixed(1)}g, ΔF=${(r.fatImprovement || 0).toFixed(1)}g`);
-        logLines.push(`   Ingredient Used: ${r.ingredientUsed}, Meals Improved: ${r.mealsImproved}`);
-      });
-      if (outcome.recommendations.length === 0) {
-        logLines.push(`No eligible candidates survived bounding or dominance pruning.`);
+      logLines.push(`\n[4] DECISION EXPLANATIONS:`);
+      logLines.push(`    ★ WHY DID THE TOP RECOMMENDATION WIN?`);
+      logLines.push(`      ${outcome.auditTrail?.winnerExplanation || 'No winning recommendation.'}`);
+
+      logLines.push(`\n    ✗ WHY WERE THE ALTERNATIVES REJECTED / RANKED LOWER?`);
+      if (outcome.auditTrail?.rejections && outcome.auditTrail.rejections.length > 0) {
+        outcome.auditTrail.rejections.forEach(rej => {
+          logLines.push(`      • [${rej.type}] ${rej.label}`);
+          logLines.push(`        Stage: ${rej.stage} | Code: ${rej.reasonCode}`);
+          logLines.push(`        Details: ${rej.reasonDetails}`);
+        });
+      } else {
+        logLines.push(`      (No alternatives to reject)`);
       }
 
       UI.recommendationCache = outcome;
@@ -1296,6 +1292,7 @@ export const UI = {
     const cardsHtml = recs.map((rec, idx) => {
       const typeClass = `type-${rec.type.toLowerCase()}`;
       const typeLabel = rec.type.replace(/_/g, ' ').toUpperCase();
+      const visualScorePct = Math.round((rec.normalizedScore ?? 0) * 100);
 
       const formatDelta = (val, suffix = '') => {
         if (typeof val !== 'number' || Math.abs(val) < 0.05) return `<span class="recommend-metric-val neutral">0${suffix}</span>`;
@@ -1317,11 +1314,10 @@ export const UI = {
               <span class="recommend-rank-badge">#${idx + 1}</span>
               <span class="recommend-type-badge ${typeClass}">${esc(typeLabel)}</span>
             </div>
-            <span class="recommend-score-pill">${rec.objectiveImprovement >= 0 ? '+' : ''}${rec.objectiveImprovement.toFixed(3)} ΔJ</span>
+            <span class="recommend-score-pill" title="Raw objective improvement: +${rec.objectiveImprovement.toFixed(6)} ΔJ (${visualScorePct}% visual impact score)">${rec.objectiveImprovement >= 0 ? '+' : ''}${rec.objectiveImprovement.toFixed(3)} ΔJ (${visualScorePct}%)</span>
           </div>
 
           <div class="recommend-card-title">${esc(rec.ingredientName || rec.label)}</div>
-
 
           <div class="recommend-transition-row">
             <span>Transition:</span>

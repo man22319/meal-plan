@@ -3,7 +3,6 @@
 // ══════════════════════════════════════════
 
 import { state } from '../src/core/state.js';
-import { Persistence } from '../src/io/persistence.js';
 import { UI } from '../src/ui/render.js';
 
 let failed = 0;

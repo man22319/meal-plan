@@ -5,9 +5,6 @@
 import {
   parseDateToMs,
   formatDateStr,
-  getLocalDateString,
-  getWeightObservations,
-  getIntakeObservations,
   calculateCurrentWeight,
   calculateMovingAverage,
   calculateWeightChange,

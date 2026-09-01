@@ -10,6 +10,8 @@ export const PRECISION = Object.freeze({
    * Used for Stage 2 LP lower bound pruning, Stage 3 eligibility, and scoring.
    */
   OBJECTIVE_EPS: 1e-4, // 0.0001
+  OBJECTIVE_COMPARISON_EPS: 1e-4, // Explicit epsilon for objective tie-breaking
+  PRUNING_EPS: 1e-4, // Safe pruning threshold for Stage 2 LP lower bound
 
   /**
    * Minimum objective improvement specifically for capacity adjustments

@@ -407,7 +407,7 @@ console.log('');
 console.log('--- TEST 10: Numerical Objective Audit ---');
 // Let's audit for Baseline Plan 1 across formulations
 formulations.forEach(form => {
-  const { raw, model } = buildAndSolveModel({
+  const { raw } = buildAndSolveModel({
     targets: baselineTargets,
     meals: baselineMeals,
     ingredients: baselineIngredients,
