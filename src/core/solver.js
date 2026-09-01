@@ -9,6 +9,7 @@
 
 import { state, ensureId } from './state.js';
 import { Validation } from './validation.js';
+import { PRECISION } from './precision.js';
 
 export function resolveMealAndIngIds(mealRef, ingRef) {
   let mealId = (mealRef && typeof mealRef === 'object') ? mealRef.id : mealRef;
@@ -142,7 +143,7 @@ export function extractResults(raw, customState = state) {
         const displayQuantity = lockedQuantity;
         const servings = displayQuantity / (ing.servingSize || 100);
 
-        if (servings > 0.001 || z > 0.5 || lockedQuantity > 0) {
+        if (servings > PRECISION.SERVING_MIN_EPS || z > 0.5 || lockedQuantity > 0) {
           const itemCal = servings * ing.calories;
           const itemPro = servings * ing.protein;
           const itemCarb = servings * ing.carbs;
@@ -166,7 +167,7 @@ export function extractResults(raw, customState = state) {
             protein: itemPro,
             carbs: itemCarb,
             fat: itemFat,
-            selected: servings > 0.001 || z > 0.5,
+            selected: servings > PRECISION.SERVING_MIN_EPS || z > 0.5,
             quantityMode: ing.quantityMode || 'continuous',
             availability: ing.availability || 'normal'
           });
@@ -180,7 +181,7 @@ export function extractResults(raw, customState = state) {
         if (ing.quantityMode === 'discrete') {
           s = Math.round(s);
         }
-        if (s > 0.001) {
+        if (s > PRECISION.SERVING_MIN_EPS) {
           const plannedQuantity = s * ing.servingSize;
           const displayQuantity = plannedQuantity;
           const itemCal = s * ing.calories;
@@ -319,7 +320,7 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
     variables: {},
     options: {
       timeout: 300,
-      tolerance: 0.05
+      tolerance: PRECISION.SOLVER_MIP_GAP_TOLERANCE
     }
   };
 

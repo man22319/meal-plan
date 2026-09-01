@@ -1,4 +1,5 @@
 import { resolveAvailability } from '../core/state.js';
+import { PRECISION } from '../core/precision.js';
 
 export const AVAILABILITY_UPWARD_TRANSITIONS = {
   out: ['limited', 'low', 'normal'],
@@ -51,7 +52,7 @@ export function scoreCandidateGeometry(candidateIng, residualDeficit = {}, targe
   const normCandidate = Math.sqrt(normCandidateSq);
 
   let cosineAlignment = 0;
-  if (normDeficit > 1e-6 && normCandidate > 1e-6) {
+  if (normDeficit > PRECISION.NUMERICAL_ZERO_EPS && normCandidate > PRECISION.NUMERICAL_ZERO_EPS) {
     cosineAlignment = Math.max(-1, Math.min(1, dotProduct / (normDeficit * normCandidate)));
   }
 
@@ -108,18 +109,14 @@ export function generateCandidates(state, options = {}) {
   const baselineSolve = options.baselineSolve;
   const residualDeficit = extractResidualDeficit(baselineSolve, targets);
 
-  console.log('Candidate generation - Residual deficits:', residualDeficit);
-
-  // Determine if we have excess (over target) or deficit (under target)
-  const hasExcess = Object.values(residualDeficit).some(v => v < -0.01);
-  const hasDeficit = Object.values(residualDeficit).some(v => v > 0.01);
-
-  console.log('Candidate generation - hasExcess:', hasExcess, 'hasDeficit:', hasDeficit);
+  // Materiality threshold: distinguish actionable gaps from numerical noise
+  const hasDeficit = Object.values(residualDeficit).some(v => v > PRECISION.MACRO_MATERIALITY_EPS);
+  const hasExcess = Object.values(residualDeficit).some(v => v < -PRECISION.MACRO_MATERIALITY_EPS);
+  const isImprovable = hasDeficit || hasExcess || !baselineSolve?.feasible;
 
   // 1. Availability Upgrades (RESTOCK) — emit maximal target (→ normal)
-  // Only generate RESTOCK candidates if we have deficits (need more ingredients)
-  // If we have excess, adding more ingredients will likely make things worse
-  if (hasDeficit && !hasExcess) {
+  // Generate RESTOCK whenever state is improvable (deficits, excesses that can be rebalanced, or infeasibility)
+  if (isImprovable) {
     ingredients.forEach(ing => {
       const currentAvail = resolveAvailability(ing.availability);
       if (currentAvail === 'normal') return;
@@ -151,10 +148,8 @@ export function generateCandidates(state, options = {}) {
   }
 
   // 2. Capacity Expansions (INCREASE_CAPACITY)
-  // Only generate when we have deficits (need more capacity to meet targets)
-  // When over target, we want to reduce, not expand
-  if (hasDeficit) {
-    console.log('Generating INCREASE_CAPACITY candidates (hasDeficit = true)');
+  // Generate when we have deficits or infeasibility (need more capacity to meet targets)
+  if (hasDeficit || !baselineSolve?.feasible) {
     const usageMap = new Map();
     if (baselineSolve && Array.isArray(baselineSolve.result?.mealResults)) {
       baselineSolve.result.mealResults.forEach(m => {

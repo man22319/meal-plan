@@ -5,6 +5,7 @@
 // Guarantees 100% immutability of original application state.
 
 import { solveModel } from '../core/solver.js';
+import { PRECISION } from '../core/precision.js';
 
 /**
  * Deep clones an application state payload.
@@ -59,10 +60,10 @@ export function applyCandidateToState(stateClone, candidate) {
  * @param {object} baseState - Base application state.
  * @param {object} candidate - Candidate action descriptor.
  * @param {object} baseSolve - Baseline MILP solve result.
- * @param {number} [minThreshold=0.0001] - Objective improvement pruning threshold.
- * @returns {object} { feasible, lowerBound, maxPossibleImprovement, pruned, reason, lpSolve }
+ * @param {number} [minThreshold] - Objective improvement pruning threshold.
+ * @returns {object} { feasible, lowerBound, maxPossibleImprovement, pruned, reason, lpSolve, effectiveThreshold }
  */
-export function simulateCandidateLPBound(baseState, candidate, baseSolve, minThreshold = 0.001) {
+export function simulateCandidateLPBound(baseState, candidate, baseSolve, minThreshold = null) {
   const clonedState = cloneState(baseState);
   applyCandidateToState(clonedState, candidate);
 
@@ -75,6 +76,7 @@ export function simulateCandidateLPBound(baseState, candidate, baseSolve, minThr
       maxPossibleImprovement: -Infinity,
       pruned: true,
       reason: 'LP_INFEASIBLE',
+      effectiveThreshold: minThreshold ?? PRECISION.OBJECTIVE_EPS,
       lpSolve: null
     };
   }
@@ -83,9 +85,11 @@ export function simulateCandidateLPBound(baseState, candidate, baseSolve, minThr
   const baseObj = typeof baseSolve.objective === 'number' ? baseSolve.objective : 0;
   const maxPossibleImprovement = baseObj - lowerBound;
 
-  // Use relative threshold: prune only if improvement is < 0.1% of baseline objective OR < absolute threshold
-  const relativeThreshold = baseObj > 0 ? baseObj * 0.001 : minThreshold;
-  const effectiveThreshold = Math.max(minThreshold, relativeThreshold);
+  // Exact mathematical contract: prune only if the theoretical upper bound on improvement
+  // is strictly below the declared minimum meaningful improvement threshold.
+  const isCapacityType = ['INCREASE_CAPACITY', 'REDUCE_CAPACITY'].includes(candidate?.type);
+  const defaultThreshold = isCapacityType ? PRECISION.OBJECTIVE_CAPACITY_EPS : PRECISION.OBJECTIVE_EPS;
+  const effectiveThreshold = typeof minThreshold === 'number' ? minThreshold : defaultThreshold;
   const pruned = maxPossibleImprovement < effectiveThreshold;
 
   return {
@@ -112,7 +116,7 @@ export function simulateCandidateLPBound(baseState, candidate, baseSolve, minThr
 export function simulateCandidate(baseState, candidate, baselineSolve = null, options = {}) {
   const baseSolve = baselineSolve || solveModel(baseState, { validate: false });
   const targets = baseState.targets || { calories: 2000, protein: 150, carbs: 200, fat: 60 };
-  const minThreshold = typeof options.minThreshold === 'number' ? options.minThreshold : 0.0001;
+  const minThreshold = typeof options.minThreshold === 'number' ? options.minThreshold : null;
 
   // Initialize Stage 1 metadata if not already attached
   if (!candidate.stage1) {
@@ -327,14 +331,14 @@ export function simulateCandidate(baseState, candidate, baselineSolve = null, op
     (m.items || []).forEach(it => {
       if ((candidate.ingredientId && it.id === candidate.ingredientId) ||
           (candidate.ingredientName && it.name === candidate.ingredientName)) {
-        if (it.servings > 0.001 || it.quantity > 0.01) {
+        if (it.servings > PRECISION.SERVING_MIN_EPS || it.quantity > PRECISION.MACRO_MATERIALITY_EPS) {
           ingredientUsed = true;
         }
       }
     });
   });
 
-  const isMeaningful = (objImprovement > 1e-5) || (totalNormImprovement > 0.001);
+  const isMeaningful = (objImprovement > PRECISION.OBJECTIVE_CAPACITY_EPS) || (totalNormImprovement > PRECISION.SERVING_MIN_EPS);
 
   return {
     candidate,

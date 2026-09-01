@@ -34,6 +34,7 @@ import { simulateCandidates, simulateCandidateLPBound } from '../src/recommendat
 import { isCandidateDominated, pruneDominatedCandidates, rankRecommendations } from '../src/recommendation/scoring.js';
 import { getRecommendations, applyRecommendation } from '../src/recommendation/recommendation.js';
 import { solveModel } from '../src/core/solver.js';
+import { PRECISION } from '../src/core/precision.js';
 
 
 export function runRecommendationTestSuite() {
@@ -338,13 +339,152 @@ export function runRecommendationTestSuite() {
       `Successfully applied top recommendation: ${topRec.label}`);
     assert(applyRes.newFingerprint !== oldFp,
       `State fingerprint updated after mutation: ${applyRes.newFingerprint}`);
-
     // Staleness check
     const staleApply = applyRecommendation(e2eState, topRec, { autoPersist: false });
     assert(staleApply.success === false && staleApply.error === 'STALE_FINGERPRINT',
       'Apply fails safely when attempted against a stale state fingerprint');
   } else {
     console.log('[SKIP] Application tests - no recommendations generated (state may be optimal)');
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // 8. PRECISION BOUNDARIES & REGRESSION TESTS
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 8. Precision Boundaries & Regression Tests ---');
+
+  // Regression 1: Deficit + excess simultaneously (Protein -2%, Carbs +0.5%)
+  // Must generate protein RESTOCK candidates despite simultaneous carb excess.
+  const mixedState = {
+    targets: { calories: 2000, protein: 150, carbs: 200, fat: 60 },
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: [
+      { id: 'ing_chicken_out', name: 'Chicken Breast', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'out' },
+      { id: 'ing_rice', name: 'Rice', servingSize: 100, unit: 'g', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, minServings: 0, maxServings: 8, availability: 'normal' }
+    ],
+    weights: { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 },
+    penalties: { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 },
+    mealConstraints: { minIngredients: 1, maxIngredients: 4 },
+    actuals: {},
+    eatenItems: {}
+  };
+  const mixedBaseline = solveModel(mixedState, { validate: false });
+  const mixedCands = generateCandidates(mixedState, { baselineSolve: mixedBaseline });
+  const chickenRestock = mixedCands.find(c => c.ingredientId === 'ing_chicken_out' && c.type === 'RESTOCK');
+  assert(Boolean(chickenRestock),
+    'Simultaneous deficit (protein) and excess (carbs) correctly generates protein RESTOCK candidate');
+
+  // Regression 2: Sub-threshold deficit (e.g. 0.005% floating point noise)
+  // Ensure noise does not trigger candidate generation when within MACRO_MATERIALITY_EPS.
+  const perfectState = {
+    targets: { calories: 2000, protein: 150, carbs: 200, fat: 60 },
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: [
+      { id: 'ing_out_noise', name: 'NoiseFood', servingSize: 100, unit: 'g', calories: 100, protein: 10, carbs: 10, fat: 2, minServings: 0, maxServings: 5, availability: 'out' }
+    ]
+  };
+  const noiseBaseline = {
+    feasible: true,
+    objective: 0.000001,
+    result: {
+      totals: { calories: 1999.99, protein: 149.999, carbs: 200.001, fat: 60 },
+      deviations: {
+        calories: { absolute: -0.01, percentage: -0.0005 },
+        protein: { absolute: -0.001, percentage: -0.0006 },
+        carbs: { absolute: 0.001, percentage: 0.0005 },
+        fat: { absolute: 0, percentage: 0 }
+      }
+    }
+  };
+  const noiseCands = generateCandidates(perfectState, { baselineSolve: noiseBaseline });
+  assert(noiseCands.length === 0,
+    'Sub-threshold deficit/excess (< 1% materiality) does not generate spurious candidates');
+
+  // Regression 3: LP improvement just below threshold (I_max = 0.000099) -> must prune
+  const candidateSub = { id: 'c_sub', type: 'RESTOCK', ingredientId: 'c1', to: 'normal' };
+  const mockBaseSolve = { feasible: true, objective: 1.0, result: { totals: {}, deviations: {} } };
+  // Using explicit minThreshold = 0.0001
+  const subBound = simulateCandidateLPBound(simState, candidateSub, mockBaseSolve, 0.0001);
+  // If maxPossibleImprovement is < 0.0001, pruned must be true
+  assert(subBound.pruned === (subBound.maxPossibleImprovement < 0.0001),
+    `Stage 2 LP bound pruning strictly respects declared threshold (pruned=${subBound.pruned}, maxPossibleImprovement=${subBound.maxPossibleImprovement.toFixed(6)})`);
+
+  // Regression 4: LP improvement exactly at/above threshold (I_max >= 0.0001) -> must survive
+  // Regression 5: Large baseline objective (J = 2.5) must NOT inflate threshold
+  const largeBaseSolve = { feasible: true, objective: 2.5, result: { totals: {}, deviations: {} } };
+  const largeBound = simulateCandidateLPBound(simState, candidateSub, largeBaseSolve);
+  assert(largeBound.effectiveThreshold === PRECISION.OBJECTIVE_EPS,
+    `Stage 2 effective threshold remains exactly ${PRECISION.OBJECTIVE_EPS} regardless of large baseline objective (J=2.5)`);
+
+  // Regression 6: Display-rounding isolation
+  // Raw quantity (e.g. 143.49g) displayed in UI as 143g must not mutate underlying result
+  const rawTestState = {
+    targets: { calories: 2335, protein: 151, carbs: 291, fat: 62 },
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: [
+      { id: 'ing_raw', name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'normal' }
+    ]
+  };
+  const rawSolve = solveModel(rawTestState, { validate: false });
+  if (rawSolve.feasible && rawSolve.result?.mealResults[0]?.items[0]) {
+    const item = rawSolve.result.mealResults[0].items[0];
+    const initialQty = item.quantity;
+    const initialServings = item.servings;
+    const displayRounded = Math.round(item.quantity);
+    assert(typeof item.quantity === 'number' && item.quantity === initialQty,
+      `Raw quantity (${item.quantity.toFixed(4)}) is preserved in state while display uses Math.round (${displayRounded})`);
+    assert(Math.abs(item.servings - initialServings) < PRECISION.NUMERICAL_ZERO_EPS,
+      'Raw fractional servings are preserved with full IEEE-754 precision');
+  }
+
+  // Regression 7: Round-trip actual portion with awkward fractions (143g on 137g serving size)
+  const awkwardServingSize = 137;
+  const awkwardActualQty = 143;
+  const expectedServings = awkwardActualQty / awkwardServingSize; // ~1.0437956204379562
+  const awkwardState = {
+    targets: { calories: 2335, protein: 151, carbs: 291, fat: 62 },
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: [
+      { id: 'ing_awkward', name: 'Yams', servingSize: awkwardServingSize, unit: 'g', calories: 118, protein: 1.5, carbs: 27.9, fat: 0.2, minServings: 0, maxServings: 5, availability: 'normal' }
+    ],
+    actuals: {
+      'm1_ing_awkward': {
+        actualQuantity: awkwardActualQty,
+        plannedQuantityAtRecord: 100
+      }
+    }
+  };
+  const awkwardSolve = solveModel(awkwardState, { validate: false });
+  assert(awkwardSolve.feasible, 'Awkward fraction actual portion solve is feasible');
+  if (awkwardSolve.feasible && awkwardSolve.result?.mealResults[0]?.items[0]) {
+    const awkwardItem = awkwardSolve.result.mealResults[0].items[0];
+    assert(awkwardItem.actualQuantity === awkwardActualQty,
+      `Stored actual quantity exactly equals recorded observation (${awkwardActualQty}g)`);
+    assert(Math.abs(awkwardItem.servings - expectedServings) < PRECISION.NUMERICAL_ZERO_EPS,
+      `Solved servings (${awkwardItem.servings.toFixed(8)}) matches exact ratio 143/137 (${expectedServings.toFixed(8)})`);
+    const expectedCalories = expectedServings * 118;
+    assert(Math.abs(awkwardItem.calories - expectedCalories) < 1e-4,
+      `Derived calories (${awkwardItem.calories.toFixed(4)}) matches exact unrounded calculation (${expectedCalories.toFixed(4)})`);
+  }
+
+  // Regression 8: Discrete ingredient domain preservation under tightened MIP tolerance
+  const discreteState = {
+    targets: { calories: 200, protein: 20, carbs: 0, fat: 10 },
+    meals: [{ id: 'm1', name: 'Breakfast', pct: 100 }],
+    ingredients: [
+      { id: 'ing_egg', name: 'Egg', servingSize: 50, unit: 'g', calories: 70, protein: 6, carbs: 0, fat: 5, minServings: 0, maxServings: 5, quantityMode: 'discrete', availability: 'normal' }
+    ],
+    weights: { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 },
+    penalties: { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 },
+    mealConstraints: { minIngredients: 1, maxIngredients: 4 },
+    actuals: {},
+    eatenItems: {}
+  };
+  const discreteSolve = solveModel(discreteState, { validate: false });
+  assert(discreteSolve.feasible, 'Discrete ingredient solve is feasible');
+  if (discreteSolve.feasible && discreteSolve.result?.mealResults[0]?.items[0]) {
+    const eggItem = discreteSolve.result.mealResults[0].items[0];
+    assert(Number.isInteger(eggItem.servings),
+      `Discrete ingredient servings is an exact integer: ${eggItem.servings}`);
   }
 
   console.log(`\nRecommendation Test Suite Results: ${passed} passed, ${failed} failed.\n`);

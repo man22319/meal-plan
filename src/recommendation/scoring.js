@@ -2,9 +2,7 @@
 // SCORING & RANKING — Multi-metric Ranking & Dominance Pruning
 // ══════════════════════════════════════════
 
-const EPSILON_OBJ = 1e-4;
-const EPSILON_TOL = 1e-2;
-const EPSILON_STRICT_MACRO = 1e-2;
+import { PRECISION } from '../core/precision.js';
 
 const ACTION_TYPE_PRIORITY = {
   REDUCE_CAPACITY: 1,
@@ -16,7 +14,7 @@ const ACTION_TYPE_PRIORITY = {
 /**
  * Checks whether a simulation result is eligible for recommendation.
  * Requires the candidate to actually be utilized in the solution and to provide
- * meaningful improvement (avoiding fractional LP penalty jitter like 0.00001).
+ * meaningful improvement (avoiding fractional LP penalty jitter).
  *
  * @param {object} simResult - Simulation outcome.
  * @returns {boolean} True if candidate is feasible and provides meaningful positive improvement.
@@ -33,24 +31,20 @@ export function isCandidateEligible(simResult) {
     return false;
   }
 
-  // 2. Meaningful threshold: Must provide a real improvement (>= 0.0001 ΔJ or >= 0.1% macro improvement)
-  const MIN_OBJ_IMPROVEMENT = 0.0001;
-  const MIN_MACRO_IMPROVEMENT = 0.001;
+  // 2. Meaningful threshold: Must provide a real improvement
+  const improvesObjective = (simResult.objectiveImprovement || 0) >= PRECISION.OBJECTIVE_EPS;
+  const improvesMacros = (simResult.totalNormalizedMacroImprovement || 0) >= PRECISION.SERVING_MIN_EPS;
 
-  const improvesObjective = (simResult.objectiveImprovement || 0) >= MIN_OBJ_IMPROVEMENT;
-  const improvesMacros = (simResult.totalNormalizedMacroImprovement || 0) >= MIN_MACRO_IMPROVEMENT;
-
-  // Also check if any single macro deviation improved directly (lowered thresholds)
+  // Also check if any single macro deviation improved directly
   const improvesAnyMacroDirect =
-    (simResult.calorieImprovement || 0) >= 0.5 ||
-    (simResult.proteinImprovement || 0) >= 0.1 ||
-    (simResult.carbImprovement || 0) >= 0.1 ||
-    (simResult.fatImprovement || 0) >= 0.1;
+    (simResult.calorieImprovement || 0) >= PRECISION.CALORIE_DIRECT_IMP_EPS ||
+    (simResult.proteinImprovement || 0) >= PRECISION.MACRO_DIRECT_IMP_EPS ||
+    (simResult.carbImprovement || 0) >= PRECISION.MACRO_DIRECT_IMP_EPS ||
+    (simResult.fatImprovement || 0) >= PRECISION.MACRO_DIRECT_IMP_EPS;
 
-  // For capacity modifications, use lower thresholds since they expand/contract feasible region
+  // For capacity modifications, use capacity threshold
   if (['INCREASE_CAPACITY', 'REDUCE_CAPACITY'].includes(simResult.candidate?.type)) {
-    const MIN_OBJ_CAPACITY = 0.00001; // Much lower threshold for capacity changes
-    const improvesObjectiveCapacity = (simResult.objectiveImprovement || 0) >= MIN_OBJ_CAPACITY;
+    const improvesObjectiveCapacity = (simResult.objectiveImprovement || 0) >= PRECISION.OBJECTIVE_CAPACITY_EPS;
     return improvesObjectiveCapacity || improvesMacros || improvesAnyMacroDirect;
   }
 
@@ -78,7 +72,7 @@ export function isCandidateDominated(simA, simB) {
   const deltaJ_B = simB.objectiveImprovement;
 
   // Condition 1: ΔJ_B >= ΔJ_A
-  if (deltaJ_B < deltaJ_A - EPSILON_TOL) {
+  if (deltaJ_B < deltaJ_A - PRECISION.DOMINANCE_TOL_EPS) {
     return false;
   }
 
@@ -98,16 +92,16 @@ export function isCandidateDominated(simA, simB) {
   ];
 
   for (let i = 0; i < macros.length; i++) {
-    if (impB[i] < impA[i] - EPSILON_TOL) {
+    if (impB[i] < impA[i] - PRECISION.DOMINANCE_TOL_EPS) {
       return false;
     }
   }
 
   // Condition 3: At least one strict inequality
-  const strictObj = deltaJ_B > deltaJ_A + EPSILON_OBJ;
+  const strictObj = deltaJ_B > deltaJ_A + PRECISION.OBJECTIVE_EPS;
   let strictMacro = false;
   for (let i = 0; i < macros.length; i++) {
-    if (impB[i] > impA[i] + EPSILON_STRICT_MACRO) {
+    if (impB[i] > impA[i] + PRECISION.DOMINANCE_TOL_EPS) {
       strictMacro = true;
       break;
     }
@@ -216,13 +210,13 @@ export function rankRecommendations(simulationResults, options = {}) {
   const ranked = [...deduplicated].sort((a, b) => {
     // 1. Objective improvement (ΔJ) descending
     const diffObj = b.objectiveImprovement - a.objectiveImprovement;
-    if (Math.abs(diffObj) > EPSILON_OBJ) {
+    if (Math.abs(diffObj) > PRECISION.OBJECTIVE_EPS) {
       return diffObj;
     }
 
     // 2. Total normalized macro improvement descending
     const diffNorm = (b.totalNormalizedMacroImprovement || 0) - (a.totalNormalizedMacroImprovement || 0);
-    if (Math.abs(diffNorm) > 1e-4) {
+    if (Math.abs(diffNorm) > PRECISION.OBJECTIVE_EPS) {
       return diffNorm;
     }
 
