@@ -6,8 +6,11 @@ import { getLocalDateString } from './stats.js';
 
 /**
  * Creates an immutable snapshot from the current solver result state.
- * Captures all allocated items in the active meal plan with exact physical portion,
- * unit, servings, and frozen nutrient contributions.
+ * Only captures items that have been marked EATEN — this represents actual
+ * intake at the moment the snapshot is taken, not the full planned day.
+ *
+ * Returns null if no result exists. Returns a snapshot with zero totals
+ * (and an empty items array) if no items are currently marked eaten.
  */
 export function createIntakeSnapshot(stateObj, dateStr = null, recordedAtStr = null) {
   const date = dateStr || getLocalDateString();
@@ -27,6 +30,9 @@ export function createIntakeSnapshot(stateObj, dateStr = null, recordedAtStr = n
     if (!meal.items || !Array.isArray(meal.items)) return;
 
     meal.items.forEach(item => {
+      // Only snapshot items that have been explicitly marked EATEN
+      if (!item.isEaten) return;
+
       // Look up current ingredient metadata to freeze nutrient values
       const ing = (stateObj.ingredients || []).find(i => i.id === item.id || i.name === item.name) || {};
       const servingSize = (item.servingSize && item.servingSize > 0) ? item.servingSize : (ing.servingSize || 100);
@@ -55,7 +61,7 @@ export function createIntakeSnapshot(stateObj, dateStr = null, recordedAtStr = n
         quantity: item.quantity,
         unit: item.unit || ing.unit || 'g',
         servings: Number(servings.toFixed(4)),
-        isEaten: Boolean(item.isEaten),
+        isEaten: true,
         isActual: Boolean(item.isActual),
         nutrients: {
           calories: Math.round(itemCalories * 100) / 100,
@@ -70,6 +76,7 @@ export function createIntakeSnapshot(stateObj, dateStr = null, recordedAtStr = n
   return {
     date,
     recordedAt,
+    eatenItemCount: items.length,
     items,
     totals: {
       calories: Math.round(totalCalories * 100) / 100,

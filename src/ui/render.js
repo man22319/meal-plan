@@ -768,8 +768,12 @@ export const UI = {
       const today = getLocalDateString();
       const existingSnapshot = state.intakeHistory && state.intakeHistory[today];
       const isSnapshotted = Boolean(existingSnapshot);
-      const snapshotBtnText = isSnapshotted ? 'UPDATE INTAKE SNAPSHOT' : 'SNAPSHOT DAY INTAKE';
-      const snapshotBadge = isSnapshotted ? `<span class="snapshot-status-badge">Logged: ${Math.round(existingSnapshot.totals.calories)} kcal</span>` : '';
+      const snapshotBtnText = isSnapshotted ? 'UPDATE EATEN SNAPSHOT' : 'SNAPSHOT EATEN ITEMS';
+      const snapshotItemCount = existingSnapshot?.eatenItemCount ?? null;
+      const snapshotKcal = existingSnapshot ? Math.round(existingSnapshot.totals.calories) : null;
+      const snapshotBadge = isSnapshotted
+        ? `<span class="snapshot-status-badge">Eaten: ${snapshotItemCount !== null ? `${snapshotItemCount} item${snapshotItemCount !== 1 ? 's' : ''} · ` : ''}${snapshotKcal} kcal</span>`
+        : '';
 
       dailySummaryEl.innerHTML = `
         <div class="summary-card">
@@ -792,11 +796,30 @@ export const UI = {
       if (snapshotBtn) {
         snapshotBtn.addEventListener('click', () => {
           const snapshot = createIntakeSnapshot(state, today);
-          if (snapshot) {
-            recordIntakeSnapshot(state.intakeHistory, snapshot);
+
+          // No solver result at all
+          if (!snapshot) {
+            UI._showSnapshotHint(snapshotBtn, 'No solver result — press SOLVE first.', 'error');
+            return;
+          }
+
+          // No EATEN items — nothing to record
+          if (snapshot.eatenItemCount === 0) {
+            UI._showSnapshotHint(snapshotBtn, 'Mark items as EATEN first (hold an ingredient row).', 'warn');
+            return;
+          }
+
+          const res = recordIntakeSnapshot(state.intakeHistory, snapshot);
+          if (!res.error) {
+            state.intakeHistory = res.intakeHistory;
             Persistence.save();
             UI.renderResults({ scroll: false });
             UI.renderWeightTab();
+            UI._showSnapshotToast(
+              `Logged ${snapshot.eatenItemCount} item${snapshot.eatenItemCount !== 1 ? 's' : ''} · ${Math.round(snapshot.totals.calories)} kcal`
+            );
+          } else {
+            UI._showSnapshotHint(snapshotBtn, `Snapshot failed: ${res.error}`, 'error');
           }
         });
       }
@@ -1025,6 +1048,49 @@ export const UI = {
         `;
       }
     }
+  },
+  // ── Snapshot feedback helpers ──
+
+  /** Fixed-position toast that slides up, stays 3 s, then fades out. */
+  _showSnapshotToast(message) {
+    // Remove any existing toast first
+    const old = document.getElementById('snapshot-toast');
+    if (old) old.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'snapshot-toast';
+    toast.className = 'snapshot-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.innerHTML = `<span class="snapshot-toast-icon">✓</span> ${esc(message)}`;
+    document.body.appendChild(toast);
+
+    // Trigger enter animation on next frame
+    requestAnimationFrame(() => toast.classList.add('snapshot-toast--visible'));
+
+    const DISPLAY_MS = 2800;
+    const FADE_MS = 350;
+    setTimeout(() => {
+      toast.classList.remove('snapshot-toast--visible');
+      setTimeout(() => toast.remove(), FADE_MS);
+    }, DISPLAY_MS);
+  },
+
+  /**
+   * Shows a transient inline hint beneath a button.
+   * type: 'error' | 'warn'
+   */
+  _showSnapshotHint(anchorBtn, message, type = 'warn') {
+    // Remove existing hint
+    const existing = anchorBtn.parentElement?.querySelector('.snapshot-inline-hint');
+    if (existing) existing.remove();
+
+    const hint = document.createElement('div');
+    hint.className = `snapshot-inline-hint snapshot-inline-hint--${type}`;
+    hint.textContent = message;
+    anchorBtn.insertAdjacentElement('afterend', hint);
+
+    setTimeout(() => hint.remove(), 3000);
   },
 
   hideResults() {

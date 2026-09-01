@@ -55,10 +55,14 @@ function setupEventListeners() {
     const outcome = Optimization.solve({ preserveActuals: false });
     if (outcome.errors && outcome.errors.length > 0) {
       UI.showErrors(outcome.errors);
-      if (!outcome.result) {
-        UI.hideResults();
+      // If the solver failed but a previous result still exists (e.g. structural
+      // infeasibility with eaten items locked), keep showing the old results so
+      // the user can still see and unmark eaten ingredients. Only hide the results
+      // section when there is truly nothing to display.
+      if (state.result) {
+        UI.renderResults({ scroll: false });
       } else {
-        UI.renderResults();
+        UI.hideResults();
       }
     } else {
       UI.clearErrors();
