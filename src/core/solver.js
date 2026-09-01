@@ -123,8 +123,6 @@ export function extractResults(raw, customState = state) {
     let mCal = 0, mPro = 0, mCarb = 0, mFat = 0;
 
     ingredients.forEach((ing, i) => {
-      if (ing.availability === 'out') return;
-
       const actualRec = getActualRecord(meal, ing, j, i, actuals);
       const eatenRec = getEatenItemRecord(meal, ing, j, i, eatenItems);
       const isActual = Boolean(actualRec && typeof actualRec.actualQuantity === 'number');
@@ -371,36 +369,7 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
     limited: 2.0
   };
 
-  // Pre-validation: verify that locked EATEN/actual quantities do not exceed availability limits
-  const capacityErrors = [];
-  ingredients.forEach((ing, i) => {
-    let totalLockedServings = 0;
-    meals.forEach((meal, j) => {
-      const actualRec = getActualRecord(meal, ing, j, i, actuals);
-      const eatenRec = getEatenItemRecord(meal, ing, j, i, eatenItems);
-      const lockQty = (actualRec && typeof actualRec.actualQuantity === 'number')
-        ? actualRec.actualQuantity
-        : (eatenRec && typeof eatenRec.quantity === 'number' ? eatenRec.quantity : null);
-      if (lockQty !== null) {
-        totalLockedServings += lockQty / (ing.servingSize || 100);
-      }
-    });
-
-    if (ing.availability === 'out' && totalLockedServings > 0.001) {
-      capacityErrors.push(`EATEN/Actual quantity for "${ing.name}" (${totalLockedServings.toFixed(2)} servings) exceeds OUT inventory limit (0.00 servings).`);
-    } else if (ing.availability in AVAILABILITY_CAPS) {
-      const cap = AVAILABILITY_CAPS[ing.availability];
-      if (totalLockedServings > cap + 0.001) {
-        capacityErrors.push(`EATEN/Actual quantity for "${ing.name}" (${totalLockedServings.toFixed(2)} servings) exceeds available ${ing.availability.toUpperCase()} inventory limit (${cap.toFixed(2)} servings).`);
-      }
-    }
-  });
-
-  if (capacityErrors.length > 0) {
-    return { feasible: false, objective: Infinity, raw: null, result: null, errors: capacityErrors };
-  }
-
-  // 4. Daily aggregate availability capacity constraints (LOW <= 3.0, LIMITED <= 2.0)
+  // 4. Daily aggregate availability capacity constraints on future inventory (LOW <= 3.0, LIMITED <= 2.0)
   ingredients.forEach((ing, i) => {
     if (ing.availability in AVAILABILITY_CAPS) {
       model.constraints[`daily_cap_${i}`] = { max: AVAILABILITY_CAPS[ing.availability] };
@@ -419,23 +388,6 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
       const v_z = `z_${i}_${j}`;
       const v_excess = `excess_${i}_${j}`;
 
-      if (ing.availability === 'out') {
-        const fixBnd = `fix_${i}_${j}`;
-        model.constraints[fixBnd] = { equal: 0 };
-        model.variables[v_x] = { cost: 0, [fixBnd]: 1 };
-
-        if (needsBinaries) {
-          if (!relaxIntegrality) {
-            if (!model.binaries) model.binaries = {};
-            model.binaries[v_z] = 1;
-          }
-          const fixZ = `fix_z_${i}_${j}`;
-          model.constraints[fixZ] = { equal: 0 };
-          model.variables[v_z] = { cost: 0, [fixZ]: 1 };
-        }
-        return;
-      }
-
       const actualRec = getActualRecord(meal, ing, j, i, actuals);
       const eatenRec = getEatenItemRecord(meal, ing, j, i, eatenItems);
       const lockQty = (actualRec && typeof actualRec.actualQuantity === 'number')
@@ -444,7 +396,7 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
       const isRecorded = lockQty !== null;
 
       if (isRecorded) {
-        // Recorded actual quantity is an immutable observation
+        // Recorded actual quantity is an immutable physical observation
         const sActual = lockQty / (ing.servingSize || 100);
         const xEntry = {
           cost: 0
@@ -455,9 +407,8 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
         });
         xEntry[`meal_${j}`] = ing.calories;
 
-        if (hasDailyCap) {
-          xEntry[`daily_cap_${i}`] = 1;
-        }
+        // Note: Recorded consumption does NOT consume remaining inventory cap
+        // (daily_cap_i is reserved for unrecorded allocation going forward)
 
         // Lock variable exactly to recorded physical portion
         const fixBnd = `fix_${i}_${j}`;
@@ -483,6 +434,21 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
         }
 
         model.variables[v_x] = xEntry;
+      } else if (ing.availability === 'out') {
+        // Unrecorded item for an OUT ingredient cannot be allocated going forward
+        const fixBnd = `fix_${i}_${j}`;
+        model.constraints[fixBnd] = { equal: 0 };
+        model.variables[v_x] = { cost: 0, [fixBnd]: 1 };
+
+        if (needsBinaries) {
+          if (!relaxIntegrality) {
+            if (!model.binaries) model.binaries = {};
+            model.binaries[v_z] = 1;
+          }
+          const fixZ = `fix_z_${i}_${j}`;
+          model.constraints[fixZ] = { equal: 0 };
+          model.variables[v_z] = { cost: 0, [fixZ]: 1 };
+        }
       } else {
         // Unfixed decision variable (pure quantity penalty without availability cost distortion)
         const xEntry = {

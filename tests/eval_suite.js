@@ -1002,28 +1002,34 @@ export function runAvailabilityTestSuite() {
     results.push({ name: 'AV-7: State Transition Bounds', passed });
   }
 
-  // AV-8: EATEN/Actual quantity exceeding availability capacity reports clear error
+  // AV-8: Recorded EATEN/Actual quantity preserved when availability changed to LIMITED or OUT
   {
     resetSolverState();
     state.targets = { calories: 600, protein: 120, carbs: 20, fat: 8 };
     state.meals = [
-      { name: 'Breakfast', pct: 50 },
-      { name: 'Dinner', pct: 50 }
+      { id: 'meal_b', name: 'Breakfast', pct: 50 },
+      { id: 'meal_d', name: 'Dinner', pct: 50 }
     ];
     state.ingredients = [
-      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'limited' }
+      { id: 'ing_chk', name: 'Chicken', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'limited' },
+      { id: 'ing_tur', name: 'Turkey', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'normal' }
     ];
     state.eatenItems = {
-      'Breakfast_Chicken': { quantity: 250, servings: 2.5 } // 2.5 servings recorded > limited cap 2.0
+      'meal_b_ing_chk': { quantity: 250, servings: 2.5 } // 2.5 servings recorded > limited cap 2.0
     };
 
-    const outcome = Optimization.solve();
-    const passed = Boolean(outcome.errors && outcome.errors.length > 0 && outcome.errors[0].includes('exceeds available LIMITED inventory limit'));
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const bChk = outcome.result?.mealResults[0]?.items?.find(i => i.name === 'Chicken');
+    const dChk = outcome.result?.mealResults[1]?.items?.find(i => i.name === 'Chicken');
+    const dChkServings = dChk ? dChk.servings : 0;
+    const passed = Boolean(outcome.result) && (!outcome.errors || outcome.errors.length === 0) &&
+      bChk?.isEaten === true && Math.abs(bChk.quantity - 250) < 0.001 &&
+      dChkServings <= 2.001;
 
-    console.log(`[AV-8] EATEN Exceeds Availability Cap Conflict Detection:`);
-    console.log(`       Outcome Error: ${outcome.errors?.[0] || 'None'}`);
-    console.log(`       Status: ${passed ? 'PASSED (Explicit descriptive conflict error reported)' : 'FAILED'}\n`);
-    results.push({ name: 'AV-8: EATEN Cap Conflict', passed });
+    console.log(`[AV-8] EATEN Preserved After Inventory Cap Change:`);
+    console.log(`       Breakfast Chicken: ${bChk?.quantity}g (serv=${bChk?.servings?.toFixed(2)}), Dinner Chicken: ${dChkServings.toFixed(2)} serv (Cap 2.0), Errors: ${outcome.errors?.length || 0}`);
+    console.log(`       Status: ${passed ? 'PASSED (Historical consumption preserved independently of future cap)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-8: EATEN Preserved on Cap Change', passed });
   }
 
   // AV-9: EATEN/Actual quantity exactly equals availability cap
@@ -1031,17 +1037,17 @@ export function runAvailabilityTestSuite() {
     resetSolverState();
     state.targets = { calories: 300, protein: 60, carbs: 10, fat: 4 };
     state.meals = [
-      { name: 'Breakfast', pct: 50 },
-      { name: 'Dinner', pct: 50 }
+      { id: 'meal_b', name: 'Breakfast', pct: 50 },
+      { id: 'meal_d', name: 'Dinner', pct: 50 }
     ];
     state.ingredients = [
-      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'limited' }
+      { id: 'ing_chk', name: 'Chicken', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'limited' }
     ];
     state.eatenItems = {
-      'Breakfast_Chicken': { quantity: 200, servings: 2.0 } // Exactly 2.0 servings locked = limited cap 2.0
+      'meal_b_ing_chk': { quantity: 200, servings: 2.0 } // Exactly 2.0 servings locked = limited cap 2.0
     };
 
-    const outcome = Optimization.solve();
+    const outcome = Optimization.solve({ preserveActuals: true });
     const chickenTotal = totalServingsAcrossMeals(outcome.result, 'Chicken');
     const passed = Boolean(outcome.result && !outcome.errors && Math.abs(chickenTotal - 2.0) < 0.001);
 
@@ -1051,31 +1057,35 @@ export function runAvailabilityTestSuite() {
     results.push({ name: 'AV-9: Exact Cap Equality', passed });
   }
 
-  // AV-10: EATEN/Actual quantity below availability cap allows remaining allocation up to cap
+  // AV-10: EATEN/Actual quantity below availability cap allows remaining allocation up to future cap
   {
     resetSolverState();
-    state.targets = { calories: 450, protein: 90, carbs: 15, fat: 6 }; // Needs 3.0 servings total
+    state.targets = { calories: 600, protein: 120, carbs: 20, fat: 8 }; // Needs 4.0 servings total
     state.meals = [
-      { name: 'Breakfast', pct: 33.3 },
-      { name: 'Lunch', pct: 33.3 },
-      { name: 'Dinner', pct: 33.4 }
+      { id: 'meal_b', name: 'Breakfast', pct: 33.3 },
+      { id: 'meal_l', name: 'Lunch', pct: 33.3 },
+      { id: 'meal_d', name: 'Dinner', pct: 33.4 }
     ];
     state.ingredients = [
-      { name: 'Chicken', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'limited' },
-      { name: 'Turkey', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'normal' }
+      { id: 'ing_chk', name: 'Chicken', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'limited' },
+      { id: 'ing_tur', name: 'Turkey', servingSize: 100, unit: 'g', calories: 150, protein: 30, carbs: 5, fat: 2, minServings: 0, maxServings: 5, availability: 'normal' }
     ];
     state.eatenItems = {
-      'Breakfast_Chicken': { quantity: 120, servings: 1.2 } // 1.2 servings locked in breakfast; remaining capacity is 0.8
+      'meal_b_ing_chk': { quantity: 120, servings: 1.2 } // 1.2 servings locked in breakfast; future capacity across lunch+dinner is 2.0
     };
 
-    const outcome = Optimization.solve();
+    const outcome = Optimization.solve({ preserveActuals: true });
+    const bChk = outcome.result?.mealResults[0]?.items?.find(i => i.name === 'Chicken')?.servings || 0;
+    const lChk = outcome.result?.mealResults[1]?.items?.find(i => i.name === 'Chicken')?.servings || 0;
+    const dChk = outcome.result?.mealResults[2]?.items?.find(i => i.name === 'Chicken')?.servings || 0;
+    const futureChicken = lChk + dChk;
     const chickenTotal = totalServingsAcrossMeals(outcome.result, 'Chicken');
     const turkeyTotal = totalServingsAcrossMeals(outcome.result, 'Turkey');
-    const passed = Boolean(outcome.result && !outcome.errors && Math.abs(chickenTotal - 2.0) < 0.05 && Math.abs(chickenTotal + turkeyTotal - 3.0) < 0.05);
+    const passed = Boolean(outcome.result && !outcome.errors && Math.abs(bChk - 1.2) < 0.001 && futureChicken <= 2.001 && Math.abs(chickenTotal + turkeyTotal - 4.0) < 0.05);
 
-    console.log(`[AV-10] EATEN Below Cap Partial Allocation:`);
-    console.log(`       Chicken Locked: 1.2 serv, Solved Chicken Total: ${chickenTotal.toFixed(2)} serv (Cap 2.0), Turkey: ${turkeyTotal.toFixed(2)} serv`);
-    console.log(`       Status: ${passed ? 'PASSED (Remaining capacity accurately utilized without overflow)' : 'FAILED'}\n`);
+    console.log(`[AV-10] Future Allocation Up To Future Cap:`);
+    console.log(`       Chicken Locked: ${bChk.toFixed(2)} serv, Future Chicken: ${futureChicken.toFixed(2)} serv (Cap 2.0), Total Chicken: ${chickenTotal.toFixed(2)} serv, Turkey: ${turkeyTotal.toFixed(2)} serv`);
+    console.log(`       Status: ${passed ? 'PASSED (Future capacity accurately utilized without constraining past intake)' : 'FAILED'}\n`);
     results.push({ name: 'AV-10: Partial Cap Allocation', passed });
   }
 
@@ -1096,6 +1106,76 @@ export function runAvailabilityTestSuite() {
     console.log(`       FoodB (minServings=0.5, limited): ${foodBServings.toFixed(2)} serv (micro-portion prevented)`);
     console.log(`       Status: ${passed ? 'PASSED (Zero micro-portion fragmentation)' : 'FAILED'}\n`);
     results.push({ name: 'AV-11: Practical Portions', passed });
+  }
+
+  // AV-12: Complete Milk Exhaustion Workflow (FIXME/ISSUES.md Regression Invariant)
+  {
+    resetSolverState();
+    state.targets = { calories: 800, protein: 50, carbs: 100, fat: 10 };
+    state.meals = [
+      { id: 'meal_1', name: 'Meal 1', pct: 50 },
+      { id: 'meal_2', name: 'Meal 2', pct: 25 },
+      { id: 'meal_3', name: 'Meal 3', pct: 25 }
+    ];
+    state.ingredients = [
+      { id: 'ing_milk', name: 'Fat Free Milk', servingSize: 240, unit: 'mL', calories: 90, protein: 9, carbs: 12, fat: 0, minServings: 0, maxServings: 5, availability: 'normal' },
+      { id: 'ing_oats', name: 'Oats', servingSize: 40, unit: 'g', calories: 150, protein: 5, carbs: 27, fat: 3, minServings: 0, maxServings: 5, availability: 'normal' }
+    ];
+
+    // User has consumed Meal 1: 768 mL Fat Free Milk (locked as eaten)
+    state.eatenItems['meal_1_ing_milk'] = {
+      quantity: 768,
+      servings: 768 / 240,
+      plannedQuantity: 768
+    };
+
+    // User has consumed Meal 2: 200 mL Fat Free Milk (recorded as actual from planned 240 mL, marked eaten)
+    state.actuals['meal_2_ing_milk'] = {
+      actualQuantity: 200,
+      plannedQuantityAtRecord: 240
+    };
+    state.eatenItems['meal_2_ing_milk'] = {
+      quantity: 200,
+      servings: 200 / 240,
+      plannedQuantity: 240,
+      actualQuantity: 200
+    };
+
+    // User marks Fat Free Milk as OUT in inventory
+    const milkIng = state.ingredients.find(i => i.name === 'Fat Free Milk');
+    milkIng.availability = 'out';
+
+    // Solve remaining meals around OUT inventory
+    const outcome = Optimization.solve({ preserveActuals: true });
+
+    const m1Milk = outcome.result?.mealResults[0]?.items?.find(i => i.name === 'Fat Free Milk');
+    const m2Milk = outcome.result?.mealResults[1]?.items?.find(i => i.name === 'Fat Free Milk');
+    const m3Milk = outcome.result?.mealResults[2]?.items?.find(i => i.name === 'Fat Free Milk');
+
+    const totalMilkConsumed = (m1Milk?.quantity || 0) + (m2Milk?.quantity || 0);
+    const m3MilkQuantity = m3Milk ? m3Milk.quantity : 0;
+
+    // Assert raw stored/extracted quantities directly
+    const passed = Boolean(outcome.result) &&
+      (!outcome.errors || outcome.errors.length === 0) &&
+      m1Milk?.isEaten === true &&
+      Math.abs(m1Milk.quantity - 768) < 0.001 &&
+      m2Milk?.isActual === true &&
+      m2Milk?.isEaten === true &&
+      Math.abs(m2Milk.actualQuantity - 200) < 0.001 &&
+      Math.abs(m2Milk.quantity - 200) < 0.001 &&
+      Math.abs(totalMilkConsumed - 968) < 0.001 &&
+      m3MilkQuantity === 0 &&
+      !m3Milk;
+
+    console.log(`[AV-12] Milk Exhaustion Workflow (FIXME/ISSUES.md Invariant):`);
+    console.log(`       Meal 1 Milk: ${m1Milk?.quantity} mL (EATEN=true)`);
+    console.log(`       Meal 2 Milk: ${m2Milk?.quantity} mL (ACTUAL=true, EATEN=true)`);
+    console.log(`       Meal 3 Milk: ${m3MilkQuantity} mL (OUT, expected 0 mL / absent)`);
+    console.log(`       Total Consumed: ${totalMilkConsumed} mL (raw sum = 968)`);
+    console.log(`       Solver Feasible: ${Boolean(outcome.result)}, Errors: ${outcome.errors?.length || 0}`);
+    console.log(`       Status: ${passed ? 'PASSED (Milk exhausted, actuals preserved at 968 mL, re-optimized successfully)' : 'FAILED'}\n`);
+    results.push({ name: 'AV-12: Milk Exhaustion Invariant', passed });
   }
 
   const allPassed = results.every(r => r.passed);
