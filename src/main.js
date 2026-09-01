@@ -67,6 +67,32 @@ function setupEventListeners() {
     Persistence.save();
   });
 
+  // Live Search Ingredients
+  const searchInput = document.getElementById('ingredient-search-input');
+  const searchClearBtn = document.getElementById('ingredient-search-clear');
+
+  searchInput?.addEventListener('input', () => {
+    UI.filterIngredients();
+  });
+
+  searchInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (searchInput.value) {
+        searchInput.value = '';
+        UI.filterIngredients();
+      }
+      searchInput.blur();
+    }
+  });
+
+  searchClearBtn?.addEventListener('click', () => {
+    if (searchInput) {
+      searchInput.value = '';
+      UI.filterIngredients();
+      searchInput.focus();
+    }
+  });
+
   // Add ingredient
   document.getElementById('add-ingredient-btn')?.addEventListener('click', () => {
     UI.addIngredient();
@@ -86,6 +112,7 @@ function setupEventListeners() {
       ImportExport.importJSON(
         fileInput.files[0],
         () => {
+          if (searchInput) searchInput.value = '';
           UI.renderIngredients();
           UI.renderWeights();
           UI.hideResults();
@@ -105,6 +132,7 @@ function setupEventListeners() {
 
   // Reset Data
   document.getElementById('clear-data-btn')?.addEventListener('click', () => {
+    if (searchInput) searchInput.value = '';
     Persistence.resetToDefaults();
     UI.renderTargets();
     UI.renderMeals();
@@ -119,14 +147,17 @@ function setupEventListeners() {
   const solverTabBtn = document.getElementById('tab-btn-solver');
   const ingredientsTabBtn = document.getElementById('tab-btn-ingredients');
   const weightTabBtn = document.getElementById('tab-btn-weight');
+  const recommendTabBtn = document.getElementById('tab-btn-recommend');
   const solverPanel = document.getElementById('tab-solver');
   const ingredientsPanel = document.getElementById('tab-ingredients');
   const weightPanel = document.getElementById('tab-weight');
+  const recommendPanel = document.getElementById('tab-recommend');
 
   function switchTab(target) {
     const isSolver = target === 'solver';
     const isIngredients = target === 'ingredients';
     const isWeight = target === 'weight';
+    const isRecommend = target === 'recommend';
 
     solverTabBtn?.classList.toggle('active', isSolver);
     solverTabBtn?.setAttribute('aria-selected', isSolver ? 'true' : 'false');
@@ -134,6 +165,8 @@ function setupEventListeners() {
     ingredientsTabBtn?.setAttribute('aria-selected', isIngredients ? 'true' : 'false');
     weightTabBtn?.classList.toggle('active', isWeight);
     weightTabBtn?.setAttribute('aria-selected', isWeight ? 'true' : 'false');
+    recommendTabBtn?.classList.toggle('active', isRecommend);
+    recommendTabBtn?.setAttribute('aria-selected', isRecommend ? 'true' : 'false');
 
     solverPanel?.classList.toggle('hidden', !isSolver);
     solverPanel?.classList.toggle('active', isSolver);
@@ -141,15 +174,26 @@ function setupEventListeners() {
     ingredientsPanel?.classList.toggle('active', isIngredients);
     weightPanel?.classList.toggle('hidden', !isWeight);
     weightPanel?.classList.toggle('active', isWeight);
+    recommendPanel?.classList.toggle('hidden', !isRecommend);
+    recommendPanel?.classList.toggle('active', isRecommend);
 
     if (isWeight) {
       UI.renderWeightTab();
+    } else if (isRecommend) {
+      UI.renderRecommendationsTab();
     }
   }
 
   solverTabBtn?.addEventListener('click', () => switchTab('solver'));
   ingredientsTabBtn?.addEventListener('click', () => switchTab('ingredients'));
   weightTabBtn?.addEventListener('click', () => switchTab('weight'));
+  recommendTabBtn?.addEventListener('click', () => switchTab('recommend'));
+
+  // Recommendation analysis trigger
+  document.getElementById('analyze-recommend-btn')?.addEventListener('click', () => {
+    UI.runRecommendationAnalysis();
+  });
+
 
   // Record Weight Action
   const handleRecordWeight = () => {

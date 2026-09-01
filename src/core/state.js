@@ -63,3 +63,65 @@ export const state = {
   result: null
 };
 
+export function canonicalizeValue(val) {
+  if (val === null || typeof val !== 'object') {
+    return val;
+  }
+  if (Array.isArray(val)) {
+    return val.map(canonicalizeValue);
+  }
+  const sortedKeys = Object.keys(val).sort();
+  const res = {};
+  for (const k of sortedKeys) {
+    if (typeof val[k] !== 'undefined') {
+      res[k] = canonicalizeValue(val[k]);
+    }
+  }
+  return res;
+}
+
+export function canonicalJsonStringify(obj) {
+  return JSON.stringify(canonicalizeValue(obj));
+}
+
+function fnv1a32(str) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+export function generateStateFingerprint(customState = state) {
+  const s = customState || state;
+  const canonicalPayload = {
+    targets: s.targets || {},
+    meals: (s.meals || []).map(m => ({ id: m.id, name: m.name, pct: m.pct })),
+    ingredients: (s.ingredients || []).map(i => ({
+      id: i.id,
+      name: i.name,
+      servingSize: i.servingSize,
+      unit: i.unit,
+      calories: i.calories,
+      protein: i.protein,
+      carbs: i.carbs,
+      fat: i.fat,
+      minServings: i.minServings,
+      maxServings: i.maxServings,
+      quantityMode: i.quantityMode,
+      availability: i.availability,
+      preferredServings: i.preferredServings
+    })),
+    mealConstraints: s.mealConstraints || {},
+    weights: s.weights || {},
+    penalties: s.penalties || {},
+    actuals: s.actuals || {},
+    eatenItems: s.eatenItems || {}
+  };
+
+  const canonicalString = canonicalJsonStringify(canonicalPayload);
+  return `fp_${fnv1a32(canonicalString)}`;
+}
+
+

@@ -1,0 +1,338 @@
+/* ══════════════════════════════════════════
+   RECOMMENDATIONS — Advisory UI, Glassmorphic Cards,
+   Action Badges & Metric Delta Badges
+══════════════════════════════════════════ */
+
+.recommendation-control-card {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.recommend-intro-text {
+  font-size: 0.82rem;
+  color: var(--silver);
+  line-height: 1.45;
+  margin-bottom: 14px;
+}
+
+.recommend-action-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.recommend-status-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--silver);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.recommend-count-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+.recommendation-cards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Recommendation Card ── */
+.recommend-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.recommend-card:hover {
+  border-color: var(--border-hi);
+  transform: translateY(-1px);
+}
+
+.recommend-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.recommend-badges-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recommend-rank-badge {
+
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 3px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.recommend-type-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--silver);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.recommend-score-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 3px 8px;
+  border-radius: 12px;
+  letter-spacing: 0.5px;
+}
+
+
+.recommend-card-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--white);
+  margin-bottom: 6px;
+}
+
+.recommend-transition-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.recommend-from-val {
+  color: var(--silver);
+  text-transform: uppercase;
+}
+
+.recommend-arrow {
+  color: var(--dim);
+}
+
+.recommend-to-val {
+  color: var(--silver);
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+/* ── Metric Delta Grid ── */
+.recommend-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+
+.recommend-metric-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.recommend-metric-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.55rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 2px;
+}
+
+.recommend-metric-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--silver);
+}
+
+
+
+.recommend-metric-val.neutral {
+  color: var(--muted);
+}
+
+/* ── Card Footer & Apply Button ── */
+.recommend-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.recommend-summary-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.btn-apply-rec {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 6px 18px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  border: 1px solid var(--border-hi);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.btn-apply-rec:hover:not(:disabled) {
+  background: var(--white);
+  color: #0c0c0e;
+  border-color: var(--white);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
+}
+
+.btn-apply-rec:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn-apply-rec:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Stale Warning Banner ── */
+.recommend-stale-banner {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  color: #111;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.75rem;
+  font-family: 'IBM Plex Mono', monospace;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recommend-stale-banner .btn {
+  color: #111;
+  border-color: #333;
+}
+
+.recommend-stale-banner .btn:hover {
+  background: #111;
+  color: #fff;
+}
+
+/* ── Empty State ── */
+.recommend-empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+.recommend-empty-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--silver);
+  margin-bottom: 6px;
+}
+
+.recommend-empty-desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 320px;
+  margin: 0 auto;
+  line-height: 1.4;
+}
+
+/* ── Debug Log Toggle ── */
+.recommend-debug-toggle-wrap {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.recommend-debug-toggle-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.recommend-debug-toggle-btn:hover {
+  color: var(--silver);
+  border-color: var(--border-hi);
+}
+
+.recommend-debug-log {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  line-height: 1.5;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+

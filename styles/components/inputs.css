@@ -246,6 +246,84 @@ label {
 .meal-total-value.valid { color: var(--white); }
 .meal-total-value.invalid { color: var(--red-text); }
 
+/* ── Ingredient Header Live Search ── */
+.ingredient-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 140px;
+  max-width: 160px;
+  flex-shrink: 1;
+}
+
+.ingredient-search-input {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--white);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.60rem;
+  font-weight: 400;
+  height: 22px;
+  padding: 1px 20px 1px 7px;
+  text-transform: none;
+  letter-spacing: 0.2px;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.ingredient-search-input:focus {
+  border-color: var(--border-hi);
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.ingredient-search-input::placeholder {
+  color: var(--dim);
+  font-size: 0.60rem;
+  letter-spacing: 0.2px;
+}
+
+.ingredient-search-clear {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  border-radius: 3px;
+  transition: color 0.12s, background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ingredient-search-clear:hover {
+  color: var(--white);
+}
+
+.ingredient-search-clear:active {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.search-query-text {
+  color: var(--silver);
+  font-weight: 600;
+}
+
 /* ── Stacked Mobile Ingredient Cards ── */
 .ingredient-list {
   display: flex;

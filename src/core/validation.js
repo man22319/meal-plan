@@ -5,18 +5,18 @@
 import { AVAILABILITY_STATES, state } from './state.js';
 
 export const Validation = {
-  validateAll() {
+  validateAll(customState = state) {
     return [
-      ...Validation.validateTargets(),
-      ...Validation.validateMeals(),
-      ...Validation.validateIngredients(),
-      ...Validation.validateMealConstraints()
+      ...Validation.validateTargets(customState),
+      ...Validation.validateMeals(customState),
+      ...Validation.validateIngredients(customState),
+      ...Validation.validateMealConstraints(customState)
     ];
   },
 
-  validateTargets() {
+  validateTargets(customState = state) {
     const errors = [];
-    const t = state.targets;
+    const t = customState?.targets || state.targets;
     ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
       if (typeof t[k] !== 'number' || isNaN(t[k])) {
         errors.push(`Target ${k}: must be a number.`);
@@ -27,14 +27,15 @@ export const Validation = {
     return errors;
   },
 
-  validateMeals() {
+  validateMeals(customState = state) {
     const errors = [];
-    if (state.meals.length === 0) {
+    const meals = customState?.meals || state.meals;
+    if (!meals || meals.length === 0) {
       errors.push('At least one meal is required.');
       return errors;
     }
     let totalPct = 0;
-    state.meals.forEach((m, i) => {
+    meals.forEach((m, i) => {
       if (!m.name || m.name.trim() === '') {
         errors.push(`Meal ${i + 1}: name is empty.`);
       }
@@ -54,13 +55,14 @@ export const Validation = {
     return errors;
   },
 
-  validateIngredients() {
+  validateIngredients(customState = state) {
     const errors = [];
-    if (state.ingredients.length === 0) {
+    const ingredients = customState?.ingredients || state.ingredients;
+    if (!ingredients || ingredients.length === 0) {
       errors.push('At least one ingredient is required.');
       return errors;
     }
-    state.ingredients.forEach((ing, i) => {
+    ingredients.forEach((ing, i) => {
       const label = ing.name || `#${i + 1}`;
       if (!ing.name || ing.name.trim() === '') {
         errors.push(`Ingredient ${i + 1}: name is empty.`);
@@ -107,11 +109,12 @@ export const Validation = {
     return errors;
   },
 
-  validateMealConstraints() {
+  validateMealConstraints(customState = state) {
     const errors = [];
-    const mc = state.mealConstraints;
+    const mc = customState?.mealConstraints || state.mealConstraints;
     if (!mc) return errors;
-    const availableCount = state.ingredients.filter(ing => ing.availability !== 'out').length;
+    const ingredients = customState?.ingredients || state.ingredients;
+    const availableCount = ingredients.filter(ing => ing.availability !== 'out').length;
     if (typeof mc.minIngredients === 'number') {
       if (mc.minIngredients < 0) {
         errors.push('Min ingredients per meal cannot be negative.');

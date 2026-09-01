@@ -34,6 +34,11 @@ import { Persistence, ImportExport } from '../src/io/persistence.js';
 import { createPressHoldController } from '../src/ui/pressHold.js';
 import { runFormattersTests } from './formatters.test.js';
 import { runUneatenAllTestSuite } from './uneaten_all.test.js';
+import { runRecommendationTestSuite } from './recommendation.test.js';
+import { runIngredientSearchTestSuite } from './ingredient_search.test.js';
+
+runRecommendationTestSuite();
+runIngredientSearchTestSuite();
 
 // Base nutritional target
 export const DAILY_TARGET = {

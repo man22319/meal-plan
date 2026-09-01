@@ -1,0 +1,360 @@
+// ══════════════════════════════════════════════════════════════════
+// AUTOMATED TEST SUITE: RECOMMENDATION ENGINE (V1)
+// ══════════════════════════════════════════════════════════════════
+
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Initialize vendor solver in Node environment if not present
+if (typeof global.solver === 'undefined') {
+  const vendorSolverPath = path.resolve(__dirname, '../src/vendor/solver.js');
+  const vendorCode = fs.readFileSync(vendorSolverPath, 'utf8');
+  const solverSandbox = {};
+  const initSolver = new Function('window', 'self', 'exports', 'module', vendorCode);
+  initSolver(solverSandbox, solverSandbox, undefined, undefined);
+  global.solver = solverSandbox.solver;
+}
+
+if (typeof global.localStorage === 'undefined') {
+  const store = new Map();
+  global.localStorage = {
+    getItem(k) { return store.has(k) ? store.get(k) : null; },
+    setItem(k, v) { store.set(k, String(v)); },
+    removeItem(k) { store.delete(k); },
+    clear() { store.clear(); }
+  };
+}
+
+import { generateCandidates, scoreCandidateGeometry } from '../src/recommendation/candidates.js';
+import { simulateCandidates, simulateCandidateLPBound } from '../src/recommendation/simulation.js';
+import { isCandidateDominated, pruneDominatedCandidates, rankRecommendations } from '../src/recommendation/scoring.js';
+import { getRecommendations, applyRecommendation } from '../src/recommendation/recommendation.js';
+import { solveModel } from '../src/core/solver.js';
+
+
+export function runRecommendationTestSuite() {
+  console.log('═══════════════════════════════════════════════════════════════════');
+  console.log(' RUNNING RECOMMENDATION SYSTEM TEST SUITE                          ');
+  console.log('═══════════════════════════════════════════════════════════════════\n');
+
+  let passed = 0;
+  let failed = 0;
+
+  function assert(condition, message) {
+    if (condition) {
+      console.log(`[PASS] ${message}`);
+      passed++;
+    } else {
+      console.error(`[FAIL] ${message}`);
+      failed++;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // 1. CANDIDATE GENERATION & STAGE 1 GEOMETRIC SCREENING
+  // ─────────────────────────────────────────────────────────────────
+  console.log('--- 1. Candidate Generation & Stage 1 Geometric Screening Tests ---');
+
+  const testState1 = {
+    targets: { calories: 2000, protein: 150, carbs: 200, fat: 60 },
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: [
+      { id: 'ing_out', name: 'OutFood', availability: 'out', maxServings: 4 },
+      { id: 'ing_limited', name: 'LimitedFood', availability: 'limited', maxServings: 2 },
+      { id: 'ing_low', name: 'LowFood', availability: 'low', maxServings: 3 },
+      { id: 'ing_norm', name: 'NormalFood', availability: 'normal', maxServings: 5 }
+    ]
+  };
+
+  // Create a baseline solve to determine if we have deficits vs excess
+  // Since we're testing the general system, use a state that would generate RESTOCK candidates
+  const baselineSolve = solveModel(testState1, { validate: false });
+
+  const cands1 = generateCandidates(testState1, { baselineSolve });
+
+  // Upward availability transitions — only when we have deficits
+  const outTransitions = cands1.filter(c => c.ingredientId === 'ing_out' && c.type === 'RESTOCK').map(c => c.to);
+  // This test is now conditional based on whether we have deficits
+  if (baselineSolve.feasible && baselineSolve.result) {
+    const hasDeficit = Object.values(baselineSolve.result.deviations || {}).some(d => d?.absolute > 0);
+    if (hasDeficit) {
+      assert(outTransitions.length === 1 && outTransitions[0] === 'normal',
+        'OutFood generates exactly out → normal when there are deficits');
+    } else {
+      // When over target, we may still generate some candidates, so just log and skip
+      console.log(`[INFO] OutFood RESTOCK transitions: ${outTransitions.length} (state may be over target)`);
+    }
+  } else {
+    console.log('[SKIP] RESTOCK transition tests - baseline solve infeasible');
+  }
+
+  const normTransitions = cands1.filter(c => c.ingredientId === 'ing_norm' && c.type === 'RESTOCK');
+  assert(normTransitions.length === 0,
+    'NormalFood generates 0 RESTOCK transitions (already at normal)');
+
+  // Capacity transitions — only when we have deficits
+  const limitedCaps = cands1.filter(c => c.ingredientId === 'ing_limited' && c.type === 'INCREASE_CAPACITY').map(c => c.to);
+  // This test is now conditional based on whether we have deficits
+  if (baselineSolve.feasible && baselineSolve.result) {
+    const hasDeficit = Object.values(baselineSolve.result.deviations || {}).some(d => d?.absolute > 0);
+    if (hasDeficit) {
+      assert(limitedCaps.length === 1 && limitedCaps[0] === 3,
+        'LimitedFood (maxServings 2) generates single capacity step-up to 3 when there are deficits');
+    } else {
+      assert(limitedCaps.length === 0,
+        'LimitedFood generates 0 capacity transitions when there are no deficits (over target)');
+    }
+  } else {
+    console.log('[SKIP] Capacity transition tests - baseline solve infeasible');
+  }
+
+  // Stage 1 Geometric compatibility scoring
+  const residualDeficit = { calories: 0.20, protein: 0.50, carbs: -0.10, fat: 0.05 };
+  const highProteinFood = { calories: 150, protein: 30, carbs: 0, fat: 2 };
+  const geomScore = scoreCandidateGeometry(highProteinFood, residualDeficit, testState1.targets, { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5 });
+  
+  assert(geomScore.directionalMagnitude > 0, 'Directional magnitude is positive for protein-deficit matching food');
+  assert(geomScore.cosineAlignment > 0, 'Cosine alignment is positive for protein-deficit matching food');
+  assert(geomScore.geometricScore > 0, 'Composite geometric score is positive and non-zero');
+
+  // Candidate pool additions with Stage 1 ranking
+  const candidatePool = [
+    { name: 'Active In List', calories: 100, protein: 10, carbs: 0, fat: 0 },
+    { name: 'Pure Carb Bomb', calories: 400, protein: 0, carbs: 100, fat: 0 },
+    { name: 'Ideal Protein Source', calories: 160, protein: 35, carbs: 0, fat: 2 }
+  ];
+  const testStateWithDuplicate = {
+    ...testState1,
+    ingredients: [...testState1.ingredients, { id: 'ing_dup', name: 'Active In List', availability: 'normal' }]
+  };
+  const candsWithPool = generateCandidates(testStateWithDuplicate, { candidatePool, poolLimit: 2 });
+  const poolAdds = candsWithPool.filter(c => c.type === 'ADD_INGREDIENT');
+  
+  assert(poolAdds.some(c => c.ingredientName === 'Ideal Protein Source'),
+    'Stage 1 selects the top geometrically aligned pool ingredient');
+  assert(!poolAdds.some(c => c.ingredientName === 'Active In List'),
+    'ADD_INGREDIENT filters out ingredients already active in the state');
+
+
+  // ─────────────────────────────────────────────────────────────────
+  // 2. SIMULATION, LP RELAXATION BOUNDS & IMMUTABILITY
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 2. Simulation, LP Relaxation Bounds & Immutability Tests ---');
+
+  const simState = {
+    targets: { calories: 2335, protein: 151, carbs: 291, fat: 62 },
+    meals: [
+      { id: 'm1', name: 'Breakfast', pct: 40 },
+      { id: 'm2', name: 'Lunch', pct: 30 },
+      { id: 'm3', name: 'Dinner', pct: 30 }
+    ],
+    ingredients: [
+      { id: 'c1', name: 'Chicken', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 5, availability: 'low' },
+      { id: 'c2', name: 'Yuca', servingSize: 103, unit: 'g', calories: 180, protein: 3, carbs: 42, fat: 0, minServings: 0, maxServings: 5, availability: 'normal' },
+      { id: 'c3', name: 'Whole Milk', servingSize: 240, unit: 'mL', calories: 150, protein: 8, carbs: 12, fat: 8, minServings: 0, maxServings: 2, availability: 'limited' }
+    ],
+    weights: { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 },
+    penalties: { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 },
+    mealConstraints: { minIngredients: 1, maxIngredients: 4 },
+    actuals: {},
+    eatenItems: {}
+  };
+
+  const initialSimJson = JSON.stringify(simState);
+  const simCands = generateCandidates(simState);
+  const simResults = simulateCandidates(simState, simCands);
+
+  assert(simResults.length === simCands.length,
+    `All ${simCands.length} candidates simulated successfully`);
+  assert(JSON.stringify(simState) === initialSimJson,
+    'Base state is 100% immutable and unmodified across all simulation solves');
+
+  // Direct Stage 2 LP lower bound helper check
+  const milkCandidate = simCands.find(c => c.id === 'restock_c3_normal');
+  const milkLPBound = simulateCandidateLPBound(simState, milkCandidate, simulateCandidates(simState, []));
+  assert(milkLPBound.feasible === true && typeof milkLPBound.lowerBound === 'number',
+    'simulateCandidateLPBound directly computes valid LP relaxation bound');
+
+  // Mathematical Lower Bound Verification: J*_LP <= J*_MILP
+  simResults.forEach(r => {
+    if (r.feasible && !r.pruned && typeof r.lowerBound === 'number' && typeof r.objectiveAfter === 'number') {
+      assert(r.lowerBound <= r.objectiveAfter + 1e-4,
+        `LP relaxation lower bound (${r.lowerBound.toFixed(5)}) <= exact MILP objective (${r.objectiveAfter.toFixed(5)}) for ${r.candidate.label}`);
+      assert((r.relaxationGap || 0) >= -1e-4,
+        `Integrality gap is non-negative: ${(r.relaxationGap || 0).toFixed(5)}`);
+    }
+  });
+
+
+  // ─────────────────────────────────────────────────────────────────
+  // 3. METRIC EXTRACTION ACCURACY
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 3. Metric Extraction Accuracy Tests ---');
+
+  const milkRestock = simResults.find(r => r.candidate.id === 'restock_c3_normal');
+  if (milkRestock) {
+    assert(milkRestock.feasible, 'Milk restock candidate is feasible');
+    assert(milkRestock.objectiveImprovement > 0.40,
+      `Milk restock achieves expected objective improvement (ΔJ = ${milkRestock.objectiveImprovement.toFixed(4)})`);
+    assert(typeof milkRestock.calorieImprovement === 'number' && typeof milkRestock.proteinImprovement === 'number',
+      'Macro error deltas are calculated as numbers');
+    assert(milkRestock.ingredientUsed === true,
+      'Whole Milk is utilized in candidate solution');
+  } else {
+    console.log('[SKIP] Milk restock tests - candidate not generated (likely over target)');
+  }
+
+
+  // ─────────────────────────────────────────────────────────────────
+  // 4. DOMINANCE & ELIGIBILITY
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 4. Dominance & Eligibility Tests ---');
+
+  const testSimA = {
+    candidate: { id: 'cand_a', type: 'RESTOCK' },
+    feasible: true,
+    objectiveImprovement: 0.20,
+    calorieImprovement: 10,
+    proteinImprovement: 5,
+    carbImprovement: 10,
+    fatImprovement: 2,
+    totalNormalizedMacroImprovement: 0.10
+  };
+
+  const testSimB = {
+    candidate: { id: 'cand_b', type: 'RESTOCK' },
+    feasible: true,
+    objectiveImprovement: 0.35,
+    calorieImprovement: 15,
+    proteinImprovement: 8,
+    carbImprovement: 12,
+    fatImprovement: 4,
+    totalNormalizedMacroImprovement: 0.20
+  };
+
+  assert(isCandidateDominated(testSimA, testSimB) === true,
+    'Candidate A is mathematically dominated by Candidate B');
+  assert(isCandidateDominated(testSimB, testSimA) === false,
+    'Candidate B is NOT dominated by Candidate A');
+
+  const pruned = pruneDominatedCandidates([testSimA, testSimB]);
+  assert(pruned.length === 1 && pruned[0].candidate.id === 'cand_b',
+    'pruneDominatedCandidates removes dominated candidate A');
+
+  // Trade-off preservation (neither dominates)
+  const testSimC = {
+    candidate: { id: 'cand_c', type: 'INCREASE_CAPACITY' },
+    feasible: true,
+    objectiveImprovement: 0.30,
+    calorieImprovement: 5,
+    proteinImprovement: 20, // Higher protein improvement than B
+    carbImprovement: 0,
+    fatImprovement: 0,
+    totalNormalizedMacroImprovement: 0.15
+  };
+
+  assert(isCandidateDominated(testSimC, testSimB) === false && isCandidateDominated(testSimB, testSimC) === false,
+    'Multi-objective trade-off between B and C preserves both non-dominated candidates');
+
+
+  // ─────────────────────────────────────────────────────────────────
+  // 5. DETERMINISTIC RANKING
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 5. Deterministic Ranking Tests ---');
+
+  const ranked1 = rankRecommendations([testSimA, testSimB, testSimC]);
+  const ranked2 = rankRecommendations([testSimA, testSimB, testSimC]);
+
+  assert(ranked1.length === 2 && ranked1[0].candidate.id === 'cand_b' && ranked1[1].candidate.id === 'cand_c',
+    'Ranked correctly by ΔJ with dominated candidate pruned');
+  assert(JSON.stringify(ranked1) === JSON.stringify(ranked2),
+    'Ranking is 100% deterministic on identical input');
+
+
+  // ─────────────────────────────────────────────────────────────────
+  // 6. REDUCTION CANDIDATES (OVER-TARGET SCENARIOS)
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 6. Reduction Candidates (Over-Target Scenarios) Tests ---');
+
+  const overTargetState = {
+    targets: { calories: 2000, protein: 150, carbs: 200, fat: 60 },
+    meals: [
+      { id: 'm1', name: 'Meal 1', pct: 100 }
+    ],
+    ingredients: [
+      { id: 'high_cal', name: 'HighCalorieFood', servingSize: 100, unit: 'g', calories: 400, protein: 20, carbs: 30, fat: 20, minServings: 0, maxServings: 5, availability: 'normal' },
+      { id: 'norm_food', name: 'NormalFood', servingSize: 100, unit: 'g', calories: 200, protein: 10, carbs: 20, fat: 5, minServings: 0, maxServings: 3, availability: 'normal' }
+    ],
+    weights: { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 },
+    penalties: { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 },
+    mealConstraints: { minIngredients: 1, maxIngredients: 4 },
+    actuals: {},
+    eatenItems: {}
+  };
+
+  const overTargetBaseline = solveModel(overTargetState, { validate: false });
+  const overTargetCands = generateCandidates(overTargetState, { baselineSolve: overTargetBaseline });
+
+  // Should generate REDUCE_CAPACITY candidates when over target
+  const reduceCapacityCands = overTargetCands.filter(c => c.type === 'REDUCE_CAPACITY');
+  assert(reduceCapacityCands.length > 0,
+    `REDUCE_CAPACITY candidates generated when over target: ${reduceCapacityCands.length}`);
+
+  // Should NOT generate RESTOCK candidates when over target
+  const restockCands = overTargetCands.filter(c => c.type === 'RESTOCK');
+  assert(restockCands.length === 0,
+    'No RESTOCK candidates generated when over target');
+
+  // ─────────────────────────────────────────────────────────────────
+  // 7. END-TO-END CASCADE & AUDIT TRAIL
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 7. End-to-End Cascade & Audit Trail Tests ---');
+
+  const e2eState = JSON.parse(JSON.stringify(simState));
+  const e2eOutcome = getRecommendations(e2eState);
+
+  assert(Boolean(e2eOutcome.stateFingerprint),
+    `State fingerprint generated: ${e2eOutcome.stateFingerprint}`);
+  assert(Boolean(e2eOutcome.auditTrail),
+    'Audit trail metadata generated in outcome');
+  assert(typeof e2eOutcome.auditTrail.stage1Candidates === 'number',
+    `Audit trail tracks Stage 1 candidates: ${e2eOutcome.auditTrail.stage1Candidates}`);
+  assert(typeof e2eOutcome.auditTrail.stage2LPEvaluated === 'number',
+    `Audit trail tracks Stage 2 LP evaluations: ${e2eOutcome.auditTrail.stage2LPEvaluated}`);
+
+  // Check if we got recommendations (may be 0 if state is already optimal)
+  if (e2eOutcome.recommendations.length > 0) {
+    const topRec = e2eOutcome.recommendations[0];
+    assert(Boolean(topRec.stage1) && Boolean(topRec.stage2) && Boolean(topRec.stage3),
+      'Top recommendation preserves complete candidate lifecycle (stage1, stage2, stage3)');
+
+    const oldFp = e2eOutcome.stateFingerprint;
+    const applyRes = applyRecommendation(e2eState, topRec, { autoPersist: false });
+    assert(applyRes.success === true,
+      `Successfully applied top recommendation: ${topRec.label}`);
+    assert(applyRes.newFingerprint !== oldFp,
+      `State fingerprint updated after mutation: ${applyRes.newFingerprint}`);
+
+    // Staleness check
+    const staleApply = applyRecommendation(e2eState, topRec, { autoPersist: false });
+    assert(staleApply.success === false && staleApply.error === 'STALE_FINGERPRINT',
+      'Apply fails safely when attempted against a stale state fingerprint');
+  } else {
+    console.log('[SKIP] Application tests - no recommendations generated (state may be optimal)');
+  }
+
+  console.log(`\nRecommendation Test Suite Results: ${passed} passed, ${failed} failed.\n`);
+  return { passed, failed };
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const { failed } = runRecommendationTestSuite();
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+

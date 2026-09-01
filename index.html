@@ -43,6 +43,7 @@
       <button type="button" class="tab-btn active" id="tab-btn-solver" role="tab" aria-selected="true" aria-controls="tab-solver">SOLVER</button>
       <button type="button" class="tab-btn" id="tab-btn-ingredients" role="tab" aria-selected="false" aria-controls="tab-ingredients">INGREDIENTS</button>
       <button type="button" class="tab-btn" id="tab-btn-weight" role="tab" aria-selected="false" aria-controls="tab-weight">WEIGHT</button>
+      <button type="button" class="tab-btn" id="tab-btn-recommend" role="tab" aria-selected="false" aria-controls="tab-recommend">RECOMMEND</button>
     </nav>
 
     <!-- ══════════════════════════════════════════
@@ -118,7 +119,9 @@
         <div id="meal-result-cards"></div>
         <div id="daily-summary"></div>
         <div class="approx-notice hidden" id="approx-notice"></div>
+        <div id="solver-debug-container" class="solver-debug-container"></div>
       </section>
+
     </div>
 
     <!-- ══════════════════════════════════════════
@@ -129,8 +132,16 @@
       <section class="section" id="ingredients-section">
         <div class="section-header">
           <span>Ingredients Database</span>
+          <div class="ingredient-search-wrap">
+            <input type="text" id="ingredient-search-input" class="ingredient-search-input" placeholder="Search..." aria-label="Search ingredients by name" autocomplete="off" />
+            <button type="button" id="ingredient-search-clear" class="ingredient-search-clear hidden" aria-label="Clear search" title="Clear">×</button>
+          </div>
         </div>
         <div class="card">
+          <div id="ingredient-search-empty" class="empty-state hidden">
+            <div class="empty-title">No matches found</div>
+            <div class="empty-desc">No ingredients match "<span class="search-query-text"></span>".</div>
+          </div>
           <div id="ingredient-list" class="ingredient-list"></div>
           <div class="ingredient-actions">
             <button class="btn" id="add-ingredient-btn" style="flex:1;">+ Add</button>
@@ -184,7 +195,44 @@
       </section>
     </div>
 
+    <!-- ══════════════════════════════════════════
+         RECOMMENDATIONS TAB
+    ══════════════════════════════════════════ -->
+    <div class="tab-panel hidden" id="tab-recommend" role="tabpanel" aria-labelledby="tab-btn-recommend">
+      <!-- Advisory Controls -->
+      <section class="section" id="recommendation-controls-section">
+        <div class="section-header">
+          <span>Optimization Advisory</span>
+          <span class="recommend-status-badge" id="recommend-status-badge">Ready</span>
+        </div>
+        <div class="card recommendation-control-card">
+          <p class="recommend-intro-text">
+            Evaluates what ingredient changes would most improve your meal plan targets.
+          </p>
+          <div class="recommend-action-row">
+            <button type="button" class="btn btn-primary" id="analyze-recommend-btn">ANALYZE OPPORTUNITIES</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Advisory Results -->
+      <section class="section" id="recommendation-results-section">
+        <div class="section-header">
+          <span>Ranked Recommendations</span>
+          <span class="recommend-count-badge" id="recommend-count-badge">0 actions</span>
+        </div>
+        <div id="recommendation-cards-container" class="recommendation-cards-container">
+          <div class="recommend-empty-state">
+            <div class="recommend-empty-title">No Analysis Run</div>
+            <div class="recommend-empty-desc">Click "ANALYZE OPPORTUNITIES" above to simulate counterfactual food changes.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+
     <input type="file" id="import-file-input" accept=".json,application/json" />
+
 
     <!-- ═══ ACTUAL PORTION MODAL ═══ -->
     <div class="modal-backdrop hidden" id="actual-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-ingredient-title">

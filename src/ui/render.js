@@ -1,11 +1,8 @@
-// ══════════════════════════════════════════
-// UI RENDERING & DOM UTILITIES
-// ══════════════════════════════════════════
-
-import { resolveAvailability, state, generateId } from '../core/state.js';
+import { resolveAvailability, state, generateId, generateStateFingerprint } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 import { Optimization } from '../core/solver.js';
 import { bindPressAndHold } from './pressHold.js';
+import { getRecommendationsAsync, applyRecommendation } from '../recommendation/recommendation.js';
 import {
   getLocalDateString,
   calculateCurrentWeight,
@@ -15,9 +12,10 @@ import {
 } from '../core/stats.js';
 import {
   createIntakeSnapshot,
-  recordWeightEntry,
   recordIntakeSnapshot
 } from '../core/history.js';
+
+
 
 const EPSILON = 0.001;
 
@@ -158,6 +156,45 @@ export const UI = {
   },
 
   // ── INGREDIENTS ──
+  filterIngredients() {
+    const searchInput = document.getElementById('ingredient-search-input');
+    const clearBtn = document.getElementById('ingredient-search-clear');
+    const emptyNotice = document.getElementById('ingredient-search-empty');
+    const container = document.getElementById('ingredient-list');
+    if (!container) return;
+
+    const query = (searchInput?.value || '').toLowerCase().trim();
+    if (clearBtn) {
+      clearBtn.classList.toggle('hidden', query === '');
+    }
+
+    if (state.ingredients.length === 0) {
+      if (emptyNotice) emptyNotice.classList.add('hidden');
+      return;
+    }
+
+    const cards = container.querySelectorAll('.ingredient-card');
+    let visibleCount = 0;
+
+    cards.forEach(card => {
+      const idx = parseInt(card.dataset.i, 10);
+      const ingName = (state.ingredients[idx]?.name || card.querySelector('.ing-name-input')?.value || '').toLowerCase();
+      const matches = query === '' || ingName.includes(query);
+      card.style.display = matches ? '' : 'none';
+      if (matches) visibleCount++;
+    });
+
+    if (emptyNotice) {
+      if (query !== '' && visibleCount === 0) {
+        emptyNotice.classList.remove('hidden');
+        const querySpan = emptyNotice.querySelector('.search-query-text');
+        if (querySpan) querySpan.textContent = searchInput?.value.trim() || '';
+      } else {
+        emptyNotice.classList.add('hidden');
+      }
+    }
+  },
+
   renderIngredients() {
     const container = document.getElementById('ingredient-list');
     if (!container) return;
@@ -169,6 +206,7 @@ export const UI = {
           <div class="empty-desc">Add an ingredient or import a JSON database.</div>
         </div>
       `;
+      UI.filterIngredients();
       return;
     }
 
@@ -290,6 +328,9 @@ export const UI = {
         const field = this.dataset.f;
         if (field === 'name' || field === 'unit') {
           state.ingredients[idx][field] = this.value;
+          if (field === 'name') {
+            UI.filterIngredients();
+          }
         } else {
           const val = this.value.trim();
           state.ingredients[idx][field] = val === '' ? '' : (isNaN(parseFloat(val)) ? '' : parseFloat(val));
@@ -342,9 +383,15 @@ export const UI = {
         UI.renderIngredients();
       });
     });
+
+    UI.filterIngredients();
   },
 
   addIngredient() {
+    const searchInput = document.getElementById('ingredient-search-input');
+    if (searchInput && searchInput.value) {
+      searchInput.value = '';
+    }
     state.ingredients.push({
       id: generateId('ing'),
       name: '',
@@ -365,7 +412,10 @@ export const UI = {
     if (cards && cards.length > 0) {
       const last = cards[cards.length - 1];
       const nameInput = last.querySelector('.ing-name-input');
-      if (nameInput) nameInput.focus();
+      if (nameInput) {
+        nameInput.focus();
+        nameInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
   },
 
@@ -763,11 +813,92 @@ export const UI = {
       }
     }
 
+    // Solver Calculation Debug Log
+    const debugContainer = document.getElementById('solver-debug-container');
+    if (debugContainer) {
+      const debugText = UI.generateSolverDebugLog(state);
+      debugContainer.innerHTML = `
+        <div class="solver-debug-toggle-wrap">
+          <button type="button" class="solver-debug-toggle-btn" id="toggle-solver-debug-btn">SHOW CALCULATION DEBUG LOG</button>
+          <pre class="solver-debug-log hidden" id="solver-debug-log">${esc(debugText)}</pre>
+        </div>
+      `;
+
+      const toggleBtn = document.getElementById('toggle-solver-debug-btn');
+      const debugLogEl = document.getElementById('solver-debug-log');
+      if (toggleBtn && debugLogEl) {
+        toggleBtn.addEventListener('click', () => {
+          const isHidden = debugLogEl.classList.toggle('hidden');
+          toggleBtn.textContent = isHidden ? 'SHOW CALCULATION DEBUG LOG' : 'HIDE CALCULATION DEBUG LOG';
+        });
+      }
+    }
+
     section.classList.add('visible');
     if (scroll) {
       section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   },
+
+  generateSolverDebugLog(state) {
+    const r = state.result;
+    if (!r) return 'No solver result available.';
+
+    const fp = generateStateFingerprint(state);
+    const lines = [];
+
+    lines.push(`State Fingerprint: ${fp}`);
+    lines.push(`Solve Feasible: ${r.feasible !== false}, Approximate: ${Boolean(r.approximate)}`);
+    if (typeof r.objective === 'number') {
+      lines.push(`Objective Value (J): ${r.objective.toFixed(6)}`);
+    }
+
+    // Model Dimensions
+    const activeIngs = (state.ingredients || []).filter(i => resolveAvailability(i.availability) !== 'out');
+    const lockedCount = Object.keys(state.actuals || {}).length;
+    const eatenCount = Object.keys(state.eatenItems || {}).length;
+    lines.push(`Model Dimensions: ${state.meals?.length || 0} meals, ${activeIngs.length} active ingredients (${(state.ingredients || []).length} total)`);
+    lines.push(`Active Locks: ${lockedCount} actual portions locked, ${eatenCount} items marked eaten`);
+    lines.push(`Meal Constraints: [${state.mealConstraints?.minIngredients ?? 1}, ${state.mealConstraints?.maxIngredients ?? 4}] ingredients per meal`);
+
+    // Target Deviations
+    if (r.totals && r.deviations) {
+      lines.push(`---`);
+      lines.push(`Target Deviations:`);
+      const macros = ['calories', 'protein', 'carbs', 'fat'];
+      macros.forEach(m => {
+        const tot = r.totals[m];
+        const tgt = state.targets[m];
+        const dev = r.deviations[m];
+        const unit = m === 'calories' ? 'kcal' : 'g';
+        const valStr = m === 'calories' ? Math.round(tot) : (tot != null ? tot.toFixed(1) : '0');
+        const devAbs = dev?.absolute ?? 0;
+        const devStr = m === 'calories' ? Math.round(devAbs) : devAbs.toFixed(1);
+        const sign = devAbs > 0 ? '+' : '';
+        const pct = dev?.percentage != null ? dev.percentage.toFixed(1) : '0.0';
+        lines.push(`  ${m.toUpperCase()}: ${valStr} / ${tgt}${unit} (Δ: ${sign}${devStr}${unit}, ${pct}%)`);
+      });
+    }
+
+    // Meal Allocation Breakdown
+    if (r.mealResults && r.mealResults.length > 0) {
+      lines.push(`---`);
+      lines.push(`Meal Allocations:`);
+      r.mealResults.forEach((m, idx) => {
+        const itemNames = (m.items || []).map(it => `${it.name} (${Math.round(it.quantity)}${it.unit})`).join(', ');
+        lines.push(`  #${idx + 1} ${m.name} (${m.pct}%): ${Math.round(m.calories)}/${Math.round(m.targetCalories)} kcal [${itemNames || 'None'}]`);
+      });
+    }
+
+    // Weights & Penalties
+    lines.push(`---`);
+    lines.push(`Optimization Weights & Penalties:`);
+    lines.push(`  Weights: Calories=${state.weights?.calories ?? 1}, Protein=${state.weights?.protein ?? 1}, Carbs=${state.weights?.carbs ?? 0.5}, Fat=${state.weights?.fat ?? 0.5}, MealAllocation=${state.weights?.mealAllocation ?? 0.2}`);
+    lines.push(`  Penalties: Simplicity=${state.penalties?.simplicity ?? 0.0005}, Quantity=${state.penalties?.quantity ?? 0.00001}, BoundaryExcess=${state.penalties?.boundaryExcess ?? 0.002}`);
+
+    return lines.join('\n');
+  },
+
 
   // ── WEIGHT TAB ──
   renderWeightTab() {
@@ -919,5 +1050,293 @@ export const UI = {
     if (container) container.innerHTML = '';
     const errorSection = document.getElementById('error-section');
     if (errorSection) errorSection.classList.add('hidden');
+  },
+
+  recommendationCache: null,
+  recommendationDebugLog: null,
+  _analysisRunning: false,
+
+  async runRecommendationAnalysis() {
+    if (UI._analysisRunning) return;
+    UI._analysisRunning = true;
+
+    const statusBadge = document.getElementById('recommend-status-badge');
+    const analyzeBtn = document.getElementById('analyze-recommend-btn');
+    if (statusBadge) statusBadge.textContent = 'ANALYZING...';
+    if (analyzeBtn) analyzeBtn.disabled = true;
+
+    const logLines = [];
+    const t0 = performance.now();
+
+    try {
+      // Add debug logging to understand why candidates might not be generated
+      console.log('Starting recommendation analysis with state:', state);
+
+      const outcome = await getRecommendationsAsync(state, {
+        limit: 10,
+        onProgress(done, total) {
+          if (statusBadge) statusBadge.textContent = `${done}/${total}`;
+        }
+      });
+
+      console.log('Recommendation analysis outcome:', outcome);
+
+      const elapsed = (performance.now() - t0).toFixed(1);
+
+      logLines.push(`=== RECOMMENDATION OPTIMIZATION CASCADE ===`);
+      logLines.push(`State Fingerprint: ${outcome.stateFingerprint}`);
+      logLines.push(`Baseline Feasible: ${outcome.baselineSummary.feasible}, J_B: ${outcome.baselineSummary.objective?.toFixed(6) ?? 'N/A'}`);
+      if (outcome.baselineSummary.totals) {
+        const t = outcome.baselineSummary.totals;
+        const tgts = state.targets || { calories: 2000, protein: 150, carbs: 200, fat: 60 };
+        logLines.push(`Baseline Totals: kcal=${Math.round(t.calories || 0)} P=${(t.protein || 0).toFixed(1)}g C=${(t.carbs || 0).toFixed(1)}g F=${(t.fat || 0).toFixed(1)}g`);
+        logLines.push(`Target Totals:  kcal=${tgts.calories} P=${tgts.protein}g C=${tgts.carbs}g F=${tgts.fat}g`);
+      }
+      if (outcome.baselineSummary.deviations) {
+        const d = outcome.baselineSummary.deviations;
+        logLines.push(`Baseline Deviations: kcal=${d.calories?.absolute?.toFixed(1)} P=${d.protein?.absolute?.toFixed(1)}g C=${d.carbs?.absolute?.toFixed(1)}g F=${d.fat?.absolute?.toFixed(1)}g`);
+      }
+      logLines.push(`---`);
+      logLines.push(`STAGE 1: Heuristic Screening`);
+      logLines.push(`  Candidates Generated: ${outcome.auditTrail?.stage1Candidates ?? outcome.candidatesEvaluated ?? '?'}`);
+      logLines.push(`STAGE 2: Continuous LP Relaxation Bounds`);
+      logLines.push(`  Evaluated: ${outcome.auditTrail?.stage2LPEvaluated ?? '?'}`);
+      logLines.push(`  Provably Pruned (ΔJ_max < threshold): ${outcome.auditTrail?.stage2BoundPruned ?? '0'}`);
+      // Show threshold info from first candidate if available
+      if (outcome.rawSimulations?.[0]?.candidate?.stage2?.effectiveThreshold) {
+        logLines.push(`  Effective Threshold Used: ${outcome.rawSimulations[0].candidate.stage2.effectiveThreshold.toFixed(6)}`);
+      }
+      logLines.push(`STAGE 3: Exact MILP Counterfactuals`);
+      logLines.push(`  Exact Solves Executed: ${outcome.auditTrail?.stage3ExactSolved ?? '?'}`);
+      logLines.push(`  Total Analysis Time: ${elapsed}ms`);
+      logLines.push(`---`);
+
+      // Debug: Show a few raw simulation results to diagnose identical values
+      if (outcome.rawSimulations && outcome.rawSimulations.length > 0) {
+        logLines.push(`DEBUG: First 3 raw simulation results:`);
+        outcome.rawSimulations.slice(0, 3).forEach((sim, idx) => {
+          logLines.push(`  Sim #${idx + 1}: ${sim.candidate?.ingredientName || sim.candidate?.id}`);
+          logLines.push(`    Feasible: ${sim.feasible}, Pruned: ${sim.pruned}, Stage3Eval: ${sim.candidate?.stage3?.evaluated}`);
+          logLines.push(`    ObjBefore: ${sim.objectiveBefore?.toFixed(6)}, ObjAfter: ${sim.objectiveAfter?.toFixed(6)}, ΔJ: ${sim.objectiveImprovement?.toFixed(6)}`);
+          logLines.push(`    CalImprovement: ${sim.calorieImprovement?.toFixed(2)}, ProtImprovement: ${sim.proteinImprovement?.toFixed(2)}`);
+          logLines.push(`    IngredientUsed: ${sim.ingredientUsed}`);
+        });
+        logLines.push(`---`);
+      }
+
+      logLines.push(`TOP RECOMMENDATIONS:`);
+      outcome.recommendations.forEach((r, i) => {
+        logLines.push(`#${i + 1} [${r.type}] ${r.label}`);
+        if (typeof r.lowerBound === 'number') {
+          logLines.push(`   LP Lower Bound (J_LP*): ${r.lowerBound.toFixed(6)}, Integrality Gap: ${(r.relaxationGap || 0).toFixed(6)}`);
+        }
+        if (r.stage1?.geometricScore) {
+          logLines.push(`   Stage 1 Geometry: DirMag=${r.stage1.directionalMagnitude.toFixed(4)}, Alignment=${r.stage1.cosineAlignment.toFixed(4)}, Composite=${r.stage1.geometricScore.toFixed(4)}`);
+        }
+        logLines.push(`   Exact ΔJ = +${r.objectiveImprovement.toFixed(6)}`);
+        logLines.push(`   Macro Changes: ΔCal=${(r.calorieImprovement || 0).toFixed(1)} kcal, ΔP=${(r.proteinImprovement || 0).toFixed(1)}g, ΔC=${(r.carbImprovement || 0).toFixed(1)}g, ΔF=${(r.fatImprovement || 0).toFixed(1)}g`);
+        logLines.push(`   Ingredient Used: ${r.ingredientUsed}, Meals Improved: ${r.mealsImproved}`);
+      });
+      if (outcome.recommendations.length === 0) {
+        logLines.push(`No eligible candidates survived bounding or dominance pruning.`);
+      }
+
+      UI.recommendationCache = outcome;
+      UI.recommendationDebugLog = logLines.join('\n');
+
+      if (statusBadge) statusBadge.textContent = 'Ready';
+      UI.renderRecommendationsTab();
+    } catch (err) {
+      if (statusBadge) statusBadge.textContent = 'ERROR';
+      console.error('Recommendation analysis failed:', err);
+    } finally {
+      UI._analysisRunning = false;
+      if (analyzeBtn) analyzeBtn.disabled = false;
+    }
+  },
+
+  renderRecommendationsTab() {
+    const container = document.getElementById('recommendation-cards-container');
+    const countBadge = document.getElementById('recommend-count-badge');
+    const statusBadge = document.getElementById('recommend-status-badge');
+    if (!container) return;
+
+    const cache = UI.recommendationCache;
+    const currentFp = generateStateFingerprint(state);
+
+    if (!cache) {
+      if (countBadge) countBadge.textContent = '0 actions';
+      container.innerHTML = `
+        <div class="recommend-empty-state">
+          <div class="recommend-empty-title">No Analysis Run</div>
+          <div class="recommend-empty-desc">Click "ANALYZE OPPORTUNITIES" above to simulate counterfactual food changes.</div>
+        </div>
+      `;
+      return;
+    }
+
+    const isStale = cache.stateFingerprint !== currentFp;
+    if (statusBadge) {
+      if (isStale) {
+        statusBadge.textContent = 'STALE';
+        statusBadge.style.color = '';
+      } else {
+        statusBadge.textContent = 'Ready';
+        statusBadge.style.color = '';
+      }
+    }
+
+    const recs = cache.recommendations || [];
+    if (countBadge) {
+      countBadge.textContent = `${recs.length} action${recs.length === 1 ? '' : 's'}`;
+    }
+
+    let staleHtml = '';
+    if (isStale) {
+      staleHtml = `
+        <div class="recommend-stale-banner">
+          <span>⚠ Inputs changed since this analysis. Results may be outdated.</span>
+          <button type="button" class="btn btn-sm" id="reanalyze-btn">Re-analyze</button>
+        </div>
+      `;
+    }
+
+    // Debug log toggle (always available if we have a log)
+    let debugHtml = '';
+    if (UI.recommendationDebugLog) {
+      debugHtml = `
+        <div class="recommend-debug-toggle-wrap">
+          <button type="button" class="recommend-debug-toggle-btn" id="toggle-debug-log-btn">SHOW CALCULATION DEBUG LOG</button>
+          <pre class="recommend-debug-log hidden" id="recommend-debug-log">${esc(UI.recommendationDebugLog)}</pre>
+        </div>
+      `;
+    }
+
+    if (recs.length === 0) {
+      container.innerHTML = `
+        ${staleHtml}
+        <div class="recommend-empty-state">
+          <div class="recommend-empty-title">Optimal Macro Landscape</div>
+          <div class="recommend-empty-desc">
+            No single ingredient change provides a meaningful improvement to your current solution.
+          </div>
+        </div>
+        ${debugHtml}
+      `;
+      UI._bindRecommendListeners(cache);
+      return;
+    }
+
+    const cardsHtml = recs.map((rec, idx) => {
+      const typeClass = `type-${rec.type.toLowerCase()}`;
+      const typeLabel = rec.type.replace(/_/g, ' ').toUpperCase();
+
+      const formatDelta = (val, suffix = '') => {
+        if (typeof val !== 'number' || Math.abs(val) < 0.05) return `<span class="recommend-metric-val neutral">0${suffix}</span>`;
+        const sign = val > 0 ? '+' : '';
+        return `<span class="recommend-metric-val">${sign}${val.toFixed(1)}${suffix}</span>`;
+      };
+
+      let fromDisplay = rec.from !== null ? String(rec.from) : '—';
+      let toDisplay = rec.to !== null ? String(rec.to) : '—';
+      if (rec.type === 'INCREASE_CAPACITY' || rec.type === 'REDUCE_CAPACITY') {
+        fromDisplay = `${rec.from} serv`;
+        toDisplay = `${rec.to} serv`;
+      }
+
+      return `
+        <div class="recommend-card" data-rec-id="${escAttr(rec.id)}">
+          <div class="recommend-card-header">
+            <div class="recommend-badges-wrap">
+              <span class="recommend-rank-badge">#${idx + 1}</span>
+              <span class="recommend-type-badge ${typeClass}">${esc(typeLabel)}</span>
+            </div>
+            <span class="recommend-score-pill">${rec.objectiveImprovement >= 0 ? '+' : ''}${rec.objectiveImprovement.toFixed(3)} ΔJ</span>
+          </div>
+
+          <div class="recommend-card-title">${esc(rec.ingredientName || rec.label)}</div>
+
+
+          <div class="recommend-transition-row">
+            <span>Transition:</span>
+            <span class="recommend-from-val">${esc(fromDisplay)}</span>
+            <span class="recommend-arrow">→</span>
+            <span class="recommend-to-val">${esc(toDisplay)}</span>
+          </div>
+
+          <div class="recommend-metrics-grid">
+            <div class="recommend-metric-col">
+              <span class="recommend-metric-label">Calories</span>
+              ${formatDelta(rec.calorieImprovement, ' kcal')}
+            </div>
+            <div class="recommend-metric-col">
+              <span class="recommend-metric-label">Protein</span>
+              ${formatDelta(rec.proteinImprovement, 'g')}
+            </div>
+            <div class="recommend-metric-col">
+              <span class="recommend-metric-label">Carbs</span>
+              ${formatDelta(rec.carbImprovement, 'g')}
+            </div>
+            <div class="recommend-metric-col">
+              <span class="recommend-metric-label">Fat</span>
+              ${formatDelta(rec.fatImprovement, 'g')}
+            </div>
+          </div>
+
+          <div class="recommend-card-footer">
+            <div class="recommend-summary-hint">
+              ${rec.mealsImproved > 0 ? `Improves distribution across ${rec.mealsImproved} meal${rec.mealsImproved === 1 ? '' : 's'}` : 'Expands optimization feasible region'}
+            </div>
+            <button type="button" class="btn btn-sm btn-apply-rec" data-rec-id="${escAttr(rec.id)}">APPLY</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = `${staleHtml}${cardsHtml}${debugHtml}`;
+    UI._bindRecommendListeners(cache);
+  },
+
+  _bindRecommendListeners(cache) {
+    const reanalyzeBtn = document.getElementById('reanalyze-btn');
+    reanalyzeBtn?.addEventListener('click', () => UI.runRecommendationAnalysis());
+
+    const debugToggle = document.getElementById('toggle-debug-log-btn');
+    const debugLog = document.getElementById('recommend-debug-log');
+    if (debugToggle && debugLog) {
+      debugToggle.addEventListener('click', () => {
+        const isHidden = debugLog.classList.toggle('hidden');
+        debugToggle.textContent = isHidden ? 'SHOW CALCULATION DEBUG LOG' : 'HIDE CALCULATION DEBUG LOG';
+      });
+    }
+
+    document.querySelectorAll('.btn-apply-rec').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const recId = this.dataset.recId;
+        const rec = (cache.recommendations || []).find(r => r.id === recId);
+        if (!rec) return;
+
+        const applyOutcome = applyRecommendation(state, rec);
+        if (!applyOutcome.success) {
+          if (applyOutcome.error === 'STALE_FINGERPRINT') {
+            UI.showErrors(['Recommendation is stale. Re-analyzing...']);
+            UI.runRecommendationAnalysis();
+          } else {
+            UI.showErrors([applyOutcome.message || 'Failed to apply recommendation.']);
+          }
+          return;
+        }
+
+        // Applied successfully
+        UI.renderIngredients();
+        UI.renderMeals();
+        UI.renderTargets();
+        UI.renderResults({ scroll: false });
+        UI.clearErrors();
+
+        // Re-analyze on new state
+        UI.runRecommendationAnalysis();
+      });
+    });
   }
 };
