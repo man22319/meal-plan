@@ -97,11 +97,14 @@ export function formatDailySummary(result, targets = null) {
     fat: 0
   };
 
+  const effectiveTotals = result.combinedTotals || totals;
+  const effectiveDeviations = result.combinedDeviations || result.deviations;
+
   const getDev = (key) => {
-    if (result.deviations && result.deviations[key]) {
-      return result.deviations[key];
+    if (effectiveDeviations && effectiveDeviations[key]) {
+      return effectiveDeviations[key];
     }
-    const absDev = (totals[key] || 0) - (resolvedTargets[key] || 0);
+    const absDev = (effectiveTotals[key] || 0) - (resolvedTargets[key] || 0);
     const tgt = resolvedTargets[key] || 0;
     const pctDev = tgt > 0 ? (absDev / tgt) * 100 : 0;
     return { absolute: absDev, percentage: pctDev };
@@ -125,12 +128,25 @@ export function formatDailySummary(result, targets = null) {
 
   const lines = [
     'DAILY SUMMARY',
-    '',
-    `Calories: ${Math.round(totals.calories || 0)} / ${calTarget} kcal ${formatCalorieDeviation(calDev.absolute, calDev.percentage)}`,
-    `Protein: ${(totals.protein || 0).toFixed(1)} / ${proTarget} g ${formatMacroDeviation(proDev.absolute, proDev.percentage)}`,
-    `Carbs: ${(totals.carbs || 0).toFixed(1)} / ${carbTarget} g ${formatMacroDeviation(carbDev.absolute, carbDev.percentage)}`,
-    `Fat: ${(totals.fat || 0).toFixed(1)} / ${fatTarget} g ${formatMacroDeviation(fatDev.absolute, fatDev.percentage)}`
+    ''
   ];
+
+  if (result.customFoodTotals && (result.customFoodTotals.calories > 0 || result.customFoodTotals.protein > 0 || result.customFoodTotals.carbs > 0 || result.customFoodTotals.fat > 0)) {
+    const cf = result.customFoodTotals;
+    const pStr = cf.proteinUnknown ? '—' : `${cf.protein.toFixed(1)}g`;
+    const cStr = cf.carbsUnknown ? '—' : `${cf.carbs.toFixed(1)}g`;
+    const fStr = cf.fatUnknown ? '—' : `${cf.fat.toFixed(1)}g`;
+    lines.push(`TARGET: ${calTarget} kcal | ${proTarget}P | ${carbTarget}C | ${fatTarget}F`);
+    lines.push(`CUSTOM FOODS: ${Math.round(cf.calories)} kcal | ${pStr}P | ${cStr}C | ${fStr}F`);
+    lines.push(`OPTIMIZED FOODS: ${Math.round(totals.calories || 0)} kcal | ${(totals.protein || 0).toFixed(1)}P | ${(totals.carbs || 0).toFixed(1)}C | ${(totals.fat || 0).toFixed(1)}F`);
+    lines.push(`TOTAL: ${Math.round(effectiveTotals.calories || 0)} kcal | ${(effectiveTotals.protein || 0).toFixed(1)}P | ${(effectiveTotals.carbs || 0).toFixed(1)}C | ${(effectiveTotals.fat || 0).toFixed(1)}F`);
+    lines.push('');
+  }
+
+  lines.push(`Calories: ${Math.round(effectiveTotals.calories || 0)} / ${calTarget} kcal ${formatCalorieDeviation(calDev.absolute, calDev.percentage)}`);
+  lines.push(`Protein: ${(effectiveTotals.protein || 0).toFixed(1)} / ${proTarget} g ${formatMacroDeviation(proDev.absolute, proDev.percentage)}`);
+  lines.push(`Carbs: ${(effectiveTotals.carbs || 0).toFixed(1)} / ${carbTarget} g ${formatMacroDeviation(carbDev.absolute, carbDev.percentage)}`);
+  lines.push(`Fat: ${(effectiveTotals.fat || 0).toFixed(1)} / ${fatTarget} g ${formatMacroDeviation(fatDev.absolute, fatDev.percentage)}`);
 
   const mealResults = Array.isArray(result.mealResults) ? result.mealResults : [];
 

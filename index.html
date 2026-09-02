@@ -95,7 +95,23 @@
         </div>
       </section>
 
-      <!-- 4. SOLVE -->
+      <!-- 4. CUSTOM FOODS & MEALS -->
+      <section class="section" id="custom-foods-section">
+        <div class="section-header">
+          <span>Custom Foods & Meals</span>
+          <span class="custom-foods-count-badge" id="custom-foods-count">0</span>
+        </div>
+        <div class="card custom-foods-card">
+          <div id="custom-foods-list" class="custom-foods-list"></div>
+          <div id="custom-foods-totals-container" class="custom-foods-totals-container hidden"></div>
+          <div id="custom-food-form-wrap" class="custom-food-form-wrap hidden"></div>
+          <div class="custom-food-actions" id="custom-food-main-actions">
+            <button type="button" class="btn custom-food-add-trigger" id="add-custom-food-btn">+ Custom Food</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. SOLVE -->
       <div class="solve-row">
         <button class="btn btn-primary" id="solve-btn">SOLVE</button>
       </div>
@@ -116,7 +132,9 @@
             <button type="button" class="btn btn-sm" id="copy-summary-btn">Copy</button>
           </div>
         </div>
+        <div class="plan-adjustment-card hidden" id="custom-food-infeasible-notice"></div>
         <div id="meal-result-cards"></div>
+        <div id="unassigned-custom-cards"></div>
         <div id="daily-summary"></div>
         <div class="approx-notice hidden" id="approx-notice"></div>
         <div id="solver-debug-container" class="solver-debug-container"></div>

@@ -14,10 +14,12 @@ import {
   RESULT_KEY,
   WEIGHT_KEY,
   INTAKE_KEY,
+  CUSTOM_FOODS_KEY,
   DEFAULT_INGREDIENTS,
   DEFAULT_TARGETS,
   DEFAULT_MEALS
 } from '../core/state.js';
+import { isValidCustomFoodEntry } from '../core/customFoods.js';
 
 export const Persistence = {
   save() {
@@ -31,6 +33,7 @@ export const Persistence = {
       localStorage.setItem(MEALS_KEY, JSON.stringify(state.meals));
       localStorage.setItem(WEIGHT_KEY, JSON.stringify(state.weightHistory || {}));
       localStorage.setItem(INTAKE_KEY, JSON.stringify(state.intakeHistory || {}));
+      localStorage.setItem(CUSTOM_FOODS_KEY, JSON.stringify(state.customFoods || []));
       if (state.result) {
         localStorage.setItem(RESULT_KEY, JSON.stringify({
           ...state.result,
@@ -140,6 +143,19 @@ export const Persistence = {
         }
       }
 
+      const rawCustomFoods = localStorage.getItem(CUSTOM_FOODS_KEY);
+      if (rawCustomFoods) {
+        try {
+          const parsedCustomFoods = JSON.parse(rawCustomFoods);
+          if (Array.isArray(parsedCustomFoods)) {
+            // Discard malformed entries rather than crashing
+            state.customFoods = parsedCustomFoods.filter(isValidCustomFoodEntry);
+          }
+        } catch {
+          state.customFoods = [];
+        }
+      }
+
       const rawResult = localStorage.getItem(RESULT_KEY);
       if (rawResult) {
         const parsedResult = JSON.parse(rawResult);
@@ -168,6 +184,7 @@ export const Persistence = {
       localStorage.removeItem(MEALS_KEY);
       localStorage.removeItem(WEIGHT_KEY);
       localStorage.removeItem(INTAKE_KEY);
+      localStorage.removeItem(CUSTOM_FOODS_KEY);
       localStorage.removeItem(RESULT_KEY);
     } catch {}
     state.targets = JSON.parse(JSON.stringify(DEFAULT_TARGETS));
@@ -179,6 +196,7 @@ export const Persistence = {
     state.eatenItems = {};
     state.weightHistory = {};
     state.intakeHistory = {};
+    state.customFoods = [];
     state.result = null;
   }
 };
@@ -211,7 +229,8 @@ export const ImportExport = {
         mealAllocation: state.weights?.mealAllocation ?? 0.2
       },
       weightHistory: state.weightHistory || {},
-      intakeHistory: state.intakeHistory || {}
+      intakeHistory: state.intakeHistory || {},
+      customFoods: state.customFoods || []
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -274,6 +293,12 @@ export const ImportExport = {
 
         if (parsed.intakeHistory && typeof parsed.intakeHistory === 'object' && !Array.isArray(parsed.intakeHistory)) {
           state.intakeHistory = parsed.intakeHistory;
+        }
+
+        if (Array.isArray(parsed.customFoods)) {
+          state.customFoods = parsed.customFoods.filter(isValidCustomFoodEntry);
+        } else {
+          state.customFoods = [];
         }
 
         state.eatenItems = {};

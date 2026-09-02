@@ -10,6 +10,7 @@
 import { state, ensureId } from './state.js';
 import { Validation } from './validation.js';
 import { PRECISION } from './precision.js';
+import { getRemainingTargets, getRemainingMealTarget, aggregateCustomFoods } from './customFoods.js';
 
 export function resolveMealAndIngIds(mealRef, ingRef) {
   let mealId = (mealRef && typeof mealRef === 'object') ? mealRef.id : mealRef;
@@ -251,17 +252,53 @@ export function extractResults(raw, customState = state) {
     };
   });
 
+  // Custom food totals — aggregate from state for combined display
+  const cfFoods = customState?.customFoods || state.customFoods || [];
+  const cfAgg = aggregateCustomFoods(null, cfFoods);
+  const customFoodTotals = {
+    calories: cfAgg.calories.known,
+    protein: cfAgg.protein.known,
+    carbs: cfAgg.carbs.known,
+    fat: cfAgg.fat.known,
+    caloriesUnknown: cfAgg.calories.hasUnknown,
+    proteinUnknown: cfAgg.protein.hasUnknown,
+    carbsUnknown: cfAgg.carbs.hasUnknown,
+    fatUnknown: cfAgg.fat.hasUnknown
+  };
+
+  // Combined totals: optimizer ingredients + known custom food contributions
+  const combinedTotals = {
+    calories: totals.calories + customFoodTotals.calories,
+    protein: totals.protein + customFoodTotals.protein,
+    carbs: totals.carbs + customFoodTotals.carbs,
+    fat: totals.fat + customFoodTotals.fat
+  };
+
+  // Deviations against ORIGINAL targets (full picture)
+  const combinedDeviations = {};
+  ['calories', 'protein', 'carbs', 'fat'].forEach(m => {
+    const absDev = combinedTotals[m] - targets[m];
+    const pctDev = targets[m] > 0 ? (absDev / targets[m]) * 100 : 0;
+    combinedDeviations[m] = {
+      absolute: absDev,
+      percentage: pctDev
+    };
+  });
+
   // Check whether nutritional solution is approximate due to constraints
   const approximate =
-    Math.abs(deviations.calories.absolute) > 50 ||
-    Math.abs(deviations.protein.percentage) > 5 ||
-    Math.abs(deviations.carbs.percentage) > 5 ||
-    Math.abs(deviations.fat.percentage) > 5;
+    Math.abs(combinedDeviations.calories.absolute) > 50 ||
+    Math.abs(combinedDeviations.protein.percentage) > 5 ||
+    Math.abs(combinedDeviations.carbs.percentage) > 5 ||
+    Math.abs(combinedDeviations.fat.percentage) > 5;
 
   return {
     mealResults,
     totals,
     deviations,
+    customFoodTotals,
+    combinedTotals,
+    combinedDeviations,
     approximate,
     objective: (raw && typeof raw.result === 'number') ? raw.result : 0
   };
@@ -330,21 +367,33 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
     model.ints = {};
   }
 
+  // ── Custom food target adjustment ──
+  const customFoods = customState.customFoods || state.customFoods || [];
+  const remainingTargets = getRemainingTargets(targets, customFoods);
+
   // 1. Daily macro constraints (with deviation variables dP and dM)
+  //    Use remaining targets for constraint RHS.
+  //    Deviation coefficient normalization uses ORIGINAL targets for consistent weighting.
   macros.forEach((m, mi) => {
     const c = `daily_${m}`;
-    model.constraints[c] = { equal: targets[m] };
+    const constraintTarget = remainingTargets[m].value;
+    model.constraints[c] = { equal: constraintTarget };
+    // Normalize using original target so weights remain meaningful
     const coeff = targets[m] > 0 ? mw[mi] / targets[m] : 1.0;
     model.variables[`dP_${m}`] = { cost: coeff, [c]: -1 };
     model.variables[`dM_${m}`] = { cost: coeff, [c]: 1 };
   });
 
   // 2. Meal calorie allocation constraints (soft target per meal)
+  //    Subtract custom foods assigned to each meal from that meal's allocation.
   meals.forEach((meal, j) => {
-    const tgt = (meal.pct / 100) * targets.calories;
-    if (tgt <= 0) return;
+    const mealCalTarget = (meal.pct / 100) * targets.calories;
+    if (mealCalTarget <= 0) return;
+    const mealRemaining = getRemainingMealTarget(
+      meal.id || `meal_${j}`, mealCalTarget, customFoods
+    );
     const c = `meal_${j}`;
-    model.constraints[c] = { equal: tgt };
+    model.constraints[c] = { equal: mealRemaining.value };
     const coeff = targets.calories > 0 ? (weights.mealAllocation / targets.calories) : 0.001;
     model.variables[`mdP_${j}`] = { cost: coeff, [c]: -1 };
     model.variables[`mdM_${j}`] = { cost: coeff, [c]: 1 };

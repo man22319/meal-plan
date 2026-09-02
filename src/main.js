@@ -119,6 +119,7 @@ function setupEventListeners() {
           if (searchInput) searchInput.value = '';
           UI.renderIngredients();
           UI.renderWeights();
+          UI.renderCustomFoods();
           UI.hideResults();
           UI.clearErrors();
         },
@@ -142,6 +143,7 @@ function setupEventListeners() {
     UI.renderMeals();
     UI.renderIngredients();
     UI.renderWeights();
+    UI.renderCustomFoods();
     UI.renderWeightTab();
     UI.hideResults();
     UI.clearErrors();
@@ -267,6 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.renderMeals();
   UI.renderIngredients();
   UI.renderWeights();
+  UI.renderCustomFoods();
   UI.renderWeightTab();
   if (state.result) {
     UI.renderResults();

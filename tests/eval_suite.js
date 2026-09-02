@@ -36,7 +36,9 @@ import { runFormattersTests } from './formatters.test.js';
 import { runUneatenAllTestSuite } from './uneaten_all.test.js';
 import { runRecommendationTestSuite } from './recommendation.test.js';
 import { runIngredientSearchTestSuite } from './ingredient_search.test.js';
+import { runCustomFoodsTestSuite } from './custom_foods.test.js';
 
+runCustomFoodsTestSuite();
 runRecommendationTestSuite();
 runIngredientSearchTestSuite();
 

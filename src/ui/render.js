@@ -14,6 +14,14 @@ import {
   createIntakeSnapshot,
   recordIntakeSnapshot
 } from '../core/history.js';
+import {
+  addCustomFood,
+  updateCustomFood,
+  removeCustomFood,
+  aggregateCustomFoods,
+  detectInfeasibleDimensions,
+  UNIT_OPTIONS
+} from '../core/customFoods.js';
 
 
 
@@ -462,6 +470,337 @@ export const UI = {
     });
   },
 
+  // ── CUSTOM FOODS & MEALS ──
+  renderCustomFoods() {
+    const listEl = document.getElementById('custom-foods-list');
+    const countBadge = document.getElementById('custom-foods-count');
+    const totalsContainer = document.getElementById('custom-foods-totals-container');
+    const addBtn = document.getElementById('add-custom-food-btn');
+
+    if (countBadge) {
+      countBadge.textContent = String(state.customFoods ? state.customFoods.length : 0);
+    }
+
+    if (addBtn && !addBtn.dataset.bound) {
+      addBtn.dataset.bound = 'true';
+      addBtn.addEventListener('click', () => {
+        UI.openCustomFoodForm();
+      });
+    }
+
+    if (!listEl) return;
+
+    if (!state.customFoods || state.customFoods.length === 0) {
+      listEl.innerHTML = '<div class="custom-food-empty">No custom foods added.</div>';
+      if (totalsContainer) {
+        totalsContainer.classList.add('hidden');
+        totalsContainer.innerHTML = '';
+      }
+      return;
+    }
+
+    listEl.innerHTML = state.customFoods.map(cf => {
+      // Find assigned meal name
+      let mealName = 'Unassigned';
+      if (cf.meal && cf.meal !== 'unassigned') {
+        const found = state.meals.find(m => m.id === cf.meal || m.name === cf.meal);
+        mealName = found ? found.name : cf.meal;
+      }
+
+      // Format macros
+      const isEstCal = cf.confidence?.calories === 'estimated';
+      const isEstPro = cf.confidence?.protein === 'estimated';
+      const isEstCarb = cf.confidence?.carbs === 'estimated';
+      const isEstFat = cf.confidence?.fat === 'estimated';
+
+      const calStr = cf.calories !== null ? `${isEstCal ? '~' : ''}${Math.round(cf.calories)} kcal` : '—';
+      const proStr = cf.protein !== null ? `${isEstPro ? '~' : ''}${cf.protein}P` : '—P';
+      const carbStr = cf.carbs !== null ? `${isEstCarb ? '~' : ''}${cf.carbs}C` : '—C';
+      const fatStr = cf.fat !== null ? `${isEstFat ? '~' : ''}${cf.fat}F` : '—F';
+
+      // Confidence badge text
+      const hasEstimated = isEstCal || isEstPro || isEstCarb || isEstFat;
+      let confLabel = 'Known';
+      if (hasEstimated) {
+        confLabel = 'Estimated';
+      } else if (cf.calories !== null && cf.protein === null && cf.carbs === null && cf.fat === null) {
+        confLabel = 'Calories known';
+      }
+
+      return `
+        <div class="custom-food-entry" data-id="${escAttr(cf.id)}">
+          <div class="custom-food-entry-top">
+            <div class="custom-food-title-wrap">
+              <span class="custom-food-name">${esc(cf.name)}</span>
+              <span class="custom-food-sub">${cf.amount} ${esc(cf.unit)} · ${esc(mealName)}</span>
+            </div>
+            <span class="custom-food-meal-tag">${esc(mealName)}</span>
+          </div>
+          <div class="custom-food-macros">
+            <span>${calStr}</span>
+            <span class="cf-sep">|</span>
+            <span>${proStr}</span>
+            <span class="cf-sep">|</span>
+            <span>${carbStr}</span>
+            <span class="cf-sep">|</span>
+            <span>${fatStr}</span>
+          </div>
+          <div class="custom-food-entry-bottom">
+            <span class="custom-food-confidence-badge ${hasEstimated ? 'has-estimated' : ''}">${confLabel}</span>
+            <div class="custom-food-entry-actions">
+              <button type="button" class="btn-cf-action btn-cf-edit" data-id="${escAttr(cf.id)}">Edit</button>
+              <button type="button" class="btn-cf-action btn-cf-remove" data-id="${escAttr(cf.id)}">Remove</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Wire up edit / remove
+    listEl.querySelectorAll('.btn-cf-edit').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        UI.openCustomFoodForm(btn.dataset.id);
+      });
+    });
+
+    listEl.querySelectorAll('.btn-cf-remove').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeCustomFood(btn.dataset.id);
+        Persistence.save();
+        UI.renderCustomFoods();
+        UI.markSolutionStale();
+      });
+    });
+
+    // Render totals
+    if (totalsContainer) {
+      const agg = aggregateCustomFoods(null, state.customFoods);
+      const calStr = `${Math.round(agg.calories.known)} kcal`;
+      const proStr = `${agg.protein.hasUnknown ? '—' : (Math.round(agg.protein.known * 10) / 10).toString()}P`;
+      const carbStr = `${agg.carbs.hasUnknown ? '—' : (Math.round(agg.carbs.known * 10) / 10).toString()}C`;
+      const fatStr = `${agg.fat.hasUnknown ? '—' : (Math.round(agg.fat.known * 10) / 10).toString()}F`;
+
+      totalsContainer.innerHTML = `
+        <span class="cf-totals-label">Custom Food Total</span>
+        <span class="cf-totals-values">${calStr} | ${proStr} | ${carbStr} | ${fatStr}</span>
+      `;
+      totalsContainer.classList.remove('hidden');
+    }
+  },
+
+  openCustomFoodForm(editId = null) {
+    const wrap = document.getElementById('custom-food-form-wrap');
+    const mainActions = document.getElementById('custom-food-main-actions');
+    if (!wrap) return;
+
+    if (mainActions) mainActions.classList.add('hidden');
+
+    const food = editId ? state.customFoods.find(cf => cf.id === editId) : null;
+    const isEdit = Boolean(food);
+
+    const nameVal = isEdit ? food.name : '';
+    const amountVal = isEdit ? food.amount : 1;
+    const unitVal = isEdit ? food.unit : 'wrap';
+    const calVal = isEdit && food.calories !== null ? food.calories : '';
+    const proVal = isEdit && food.protein !== null ? food.protein : '';
+    const carbVal = isEdit && food.carbs !== null ? food.carbs : '';
+    const fatVal = isEdit && food.fat !== null ? food.fat : '';
+
+    const mealVal = isEdit ? (food.meal || '') : '';
+
+    const confCal = isEdit && food.confidence?.calories ? food.confidence.calories : 'known';
+    const confPro = isEdit && food.confidence?.protein ? food.confidence.protein : 'known';
+    const confCarb = isEdit && food.confidence?.carbs ? food.confidence.carbs : 'known';
+    const confFat = isEdit && food.confidence?.fat ? food.confidence.fat : 'known';
+
+    wrap.innerHTML = `
+      <div class="cf-form-title">${isEdit ? 'EDIT CUSTOM FOOD' : 'CUSTOM FOOD'}</div>
+      <div class="cf-form-field">
+        <label for="cf-input-name">Name</label>
+        <input type="text" id="cf-input-name" class="cf-input-text" placeholder="Buffalo Chicken Wrap" value="${escAttr(nameVal)}" />
+      </div>
+
+      <div class="cf-amount-unit-row">
+        <div class="cf-form-field">
+          <label for="cf-input-amount">Amount</label>
+          <input type="number" id="cf-input-amount" class="cf-input-num" min="0.01" step="any" placeholder="1" value="${amountVal}" inputmode="decimal" />
+        </div>
+        <div class="cf-form-field">
+          <label for="cf-input-unit">Unit</label>
+          <input type="text" id="cf-input-unit" list="cf-unit-datalist" class="cf-input-text" placeholder="wrap" value="${escAttr(unitVal)}" />
+          <datalist id="cf-unit-datalist">
+            ${UNIT_OPTIONS.map(u => `<option value="${u}"></option>`).join('')}
+          </datalist>
+        </div>
+      </div>
+
+      <div class="cf-form-helper">Nutrition values should represent the entire amount entered above.</div>
+
+      <div class="cf-macros-grid">
+        <div class="cf-macro-col">
+          <label for="cf-macro-cal">Calories</label>
+          <input type="number" id="cf-macro-cal" class="cf-input-num" min="0" step="1" placeholder="—" value="${calVal}" inputmode="numeric" />
+          <div class="cf-conf-toggle" data-macro="calories">
+            <button type="button" class="cf-conf-btn ${confCal !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
+            <button type="button" class="cf-conf-btn est ${confCal === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
+          </div>
+        </div>
+
+        <div class="cf-macro-col">
+          <label for="cf-macro-pro">Protein</label>
+          <input type="number" id="cf-macro-pro" class="cf-input-num" min="0" step="0.1" placeholder="—" value="${proVal}" inputmode="decimal" />
+          <div class="cf-conf-toggle" data-macro="protein">
+            <button type="button" class="cf-conf-btn ${confPro !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
+            <button type="button" class="cf-conf-btn est ${confPro === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
+          </div>
+        </div>
+
+        <div class="cf-macro-col">
+          <label for="cf-macro-carb">Carbs</label>
+          <input type="number" id="cf-macro-carb" class="cf-input-num" min="0" step="0.1" placeholder="—" value="${carbVal}" inputmode="decimal" />
+          <div class="cf-conf-toggle" data-macro="carbs">
+            <button type="button" class="cf-conf-btn ${confCarb !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
+            <button type="button" class="cf-conf-btn est ${confCarb === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
+          </div>
+        </div>
+
+        <div class="cf-macro-col">
+          <label for="cf-macro-fat">Fat</label>
+          <input type="number" id="cf-macro-fat" class="cf-input-num" min="0" step="0.1" placeholder="—" value="${fatVal}" inputmode="decimal" />
+          <div class="cf-conf-toggle" data-macro="fat">
+            <button type="button" class="cf-conf-btn ${confFat !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
+            <button type="button" class="cf-conf-btn est ${confFat === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="cf-form-field">
+        <label for="cf-select-meal">Meal</label>
+        <select id="cf-select-meal" class="cf-select">
+          <option value="" ${!mealVal ? 'selected' : ''}>Unassigned</option>
+          ${state.meals.map(m => `
+            <option value="${escAttr(m.id)}" ${mealVal === m.id || mealVal === m.name ? 'selected' : ''}>${esc(m.name)}</option>
+          `).join('')}
+        </select>
+      </div>
+
+      <div class="cf-form-actions">
+        <button type="button" class="btn btn-sm" id="cf-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" id="cf-save-btn">${isEdit ? 'Save Changes' : 'Add Food'}</button>
+      </div>
+    `;
+
+    wrap.classList.remove('hidden');
+
+    // Wire confidence buttons
+    wrap.querySelectorAll('.cf-conf-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const toggle = btn.parentElement;
+        toggle.querySelectorAll('.cf-conf-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    // Wire Cancel
+    document.getElementById('cf-cancel-btn')?.addEventListener('click', () => {
+      UI.closeCustomFoodForm();
+    });
+
+    // Wire Save
+    document.getElementById('cf-save-btn')?.addEventListener('click', () => {
+      const name = (document.getElementById('cf-input-name')?.value || '').trim();
+      const amount = parseFloat(document.getElementById('cf-input-amount')?.value);
+      const unit = (document.getElementById('cf-input-unit')?.value || '').trim();
+
+      if (!name) {
+        document.getElementById('cf-input-name')?.focus();
+        return;
+      }
+      if (isNaN(amount) || amount <= 0) {
+        document.getElementById('cf-input-amount')?.focus();
+        return;
+      }
+      if (!unit) {
+        document.getElementById('cf-input-unit')?.focus();
+        return;
+      }
+
+      const parseMacro = (id) => {
+        const v = document.getElementById(id)?.value?.trim();
+        if (!v && v !== '0') return null;
+        const n = parseFloat(v);
+        return isNaN(n) ? null : Math.max(0, n);
+      };
+
+      const cal = parseMacro('cf-macro-cal');
+      const pro = parseMacro('cf-macro-pro');
+      const carb = parseMacro('cf-macro-carb');
+      const fat = parseMacro('cf-macro-fat');
+
+      const getConf = (macro) => {
+        const toggle = wrap.querySelector(`.cf-conf-toggle[data-macro="${macro}"]`);
+        const active = toggle?.querySelector('.cf-conf-btn.active');
+        return active?.dataset?.val === 'estimated' ? 'estimated' : 'known';
+      };
+
+      const mealSelect = document.getElementById('cf-select-meal');
+      const meal = mealSelect?.value || null;
+
+      const payload = {
+        name,
+        amount,
+        unit,
+        calories: cal,
+        protein: pro,
+        carbs: carb,
+        fat,
+        confidence: {
+          calories: getConf('calories'),
+          protein: getConf('protein'),
+          carbs: getConf('carbs'),
+          fat: getConf('fat')
+        },
+        meal
+      };
+
+      if (isEdit) {
+        updateCustomFood(editId, payload);
+      } else {
+        addCustomFood(payload);
+      }
+
+      Persistence.save();
+      UI.closeCustomFoodForm();
+      UI.renderCustomFoods();
+      UI.markSolutionStale();
+    });
+
+    // Focus name
+    window.setTimeout(() => {
+      document.getElementById('cf-input-name')?.focus();
+    }, 40);
+  },
+
+  closeCustomFoodForm() {
+    const wrap = document.getElementById('custom-food-form-wrap');
+    const mainActions = document.getElementById('custom-food-main-actions');
+    if (wrap) {
+      wrap.innerHTML = '';
+      wrap.classList.add('hidden');
+    }
+    if (mainActions) {
+      mainActions.classList.remove('hidden');
+    }
+  },
+
+  markSolutionStale() {
+    if (state.result) {
+      UI.renderResults({ scroll: false });
+    }
+  },
+
   // ── ACTUAL PORTION MODAL ──
   currentModalContext: null,
 
@@ -596,10 +935,43 @@ export const UI = {
       uneatenAllBtn.disabled = !hasEaten;
     }
 
+    // ── Plan Adjustment Warning Banner ──
+    const infeasibleNotice = document.getElementById('custom-food-infeasible-notice');
+    if (infeasibleNotice) {
+      const issues = detectInfeasibleDimensions(state.targets, state.customFoods);
+      if (issues && issues.length > 0) {
+        const issueDetails = issues.map(i => {
+          const unit = i.macro === 'calories' ? 'kcal' : 'g';
+          const amt = i.macro === 'calories' ? Math.round(i.deficit) : (Math.round(i.deficit * 10) / 10);
+          return `${i.macro} target by ${amt} ${unit}`;
+        }).join(', ');
+
+        infeasibleNotice.innerHTML = `
+          <div class="plan-adjustment-title">PLAN ADJUSTMENT</div>
+          <div class="plan-adjustment-body">
+            Your custom foods exceed today's ${issueDetails}. An exact match is impossible with the remaining food plan.
+          </div>
+          <div class="plan-adjustment-note">
+            The optimizer will minimize nutritional deviation while respecting the existing food and serving constraints.
+          </div>
+        `;
+        infeasibleNotice.classList.remove('hidden');
+      } else {
+        infeasibleNotice.classList.add('hidden');
+      }
+    }
+
     // Meal cards
     const cardsEl = document.getElementById('meal-result-cards');
     if (cardsEl) {
       cardsEl.innerHTML = r.mealResults.map((meal, mealIdx) => {
+        const assignedCustom = (state.customFoods || []).filter(cf =>
+          cf.meal === meal.id || cf.meal === meal.name || (cf.meal && cf.meal.toLowerCase() === meal.name.toLowerCase())
+        );
+        const hasCustom = assignedCustom.length > 0;
+
+        const optGroupHeader = hasCustom ? '<div class="result-group-header">OPTIMIZED</div>' : '';
+
         const itemsHTML = meal.items.length > 0
           ? meal.items.map(item => {
               const isEaten = Boolean(item.isEaten);
@@ -646,6 +1018,39 @@ export const UI = {
             }).join('')
           : '<div class="result-no-items">No ingredients assigned</div>';
 
+        let customGroupHTML = '';
+        if (hasCustom) {
+          const customRows = assignedCustom.map(cf => {
+            const isEstCal = cf.confidence?.calories === 'estimated';
+            const isEstPro = cf.confidence?.protein === 'estimated';
+            const isEstCarb = cf.confidence?.carbs === 'estimated';
+            const isEstFat = cf.confidence?.fat === 'estimated';
+
+            const calStr = cf.calories !== null ? `${isEstCal ? '~' : ''}${Math.round(cf.calories)} kcal` : '—';
+            const proStr = cf.protein !== null ? `${isEstPro ? '~' : ''}${cf.protein}P` : '—P';
+            const carbStr = cf.carbs !== null ? `${isEstCarb ? '~' : ''}${cf.carbs}C` : '—C';
+            const fatStr = cf.fat !== null ? `${isEstFat ? '~' : ''}${cf.fat}F` : '—F';
+
+            return `
+              <div class="result-ingredient-row is-custom-consumed">
+                <div class="result-ingredient-left">
+                  <span class="result-ingredient-name">Custom · ${esc(cf.name)}</span>
+                  <span class="result-planned-sub">${cf.amount} ${esc(cf.unit)}</span>
+                </div>
+                <div class="result-ingredient-right">
+                  <div class="result-qty-line">
+                    <span class="result-ingredient-qty">${calStr}</span>
+                    <span class="custom-badge">CUSTOM</span>
+                  </div>
+                  <span class="result-servings">${proStr} / ${carbStr} / ${fatStr}</span>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          customGroupHTML = `<div class="result-group-header">CONSUMED</div>${customRows}`;
+        }
+
         return `
           <div class="result-card" data-meal-id="${escAttr(meal.id || mealIdx)}" data-meal-idx="${mealIdx}">
             <div class="result-card-header">
@@ -657,7 +1062,9 @@ export const UI = {
               <span class="result-cal-target">/ ${Math.round(meal.targetCalories)} kcal</span>
             </div>
             <div class="result-ingredients-list">
+              ${optGroupHeader}
               ${itemsHTML}
+              ${customGroupHTML}
             </div>
             <div class="result-meal-macros">
               <span class="result-macro-item">
@@ -679,7 +1086,7 @@ export const UI = {
         `;
       }).join('');
 
-      cardsEl.querySelectorAll('.result-ingredient-row').forEach(row => {
+      cardsEl.querySelectorAll('.result-ingredient-row:not(.is-custom-consumed)').forEach(row => {
         bindPressAndHold(row, {
           onComplete: () => {
             const outcome = Optimization.toggleIngredientEaten(row.dataset.mealId, row.dataset.ingId);
@@ -731,7 +1138,86 @@ export const UI = {
       });
     }
 
+    // ── Unassigned Custom Foods Result Card ──
+    const unassignedEl = document.getElementById('unassigned-custom-cards');
+    if (unassignedEl) {
+      const unassigned = (state.customFoods || []).filter(cf => !cf.meal || cf.meal === 'unassigned' || cf.meal.trim() === '');
+      if (unassigned.length > 0) {
+        let unassignedCal = 0, unassignedPro = 0, unassignedCarb = 0, unassignedFat = 0;
+        const unassignedRows = unassigned.map(cf => {
+          if (cf.calories !== null) unassignedCal += cf.calories;
+          if (cf.protein !== null) unassignedPro += cf.protein;
+          if (cf.carbs !== null) unassignedCarb += cf.carbs;
+          if (cf.fat !== null) unassignedFat += cf.fat;
+
+          const isEstCal = cf.confidence?.calories === 'estimated';
+          const isEstPro = cf.confidence?.protein === 'estimated';
+          const isEstCarb = cf.confidence?.carbs === 'estimated';
+          const isEstFat = cf.confidence?.fat === 'estimated';
+
+          const calStr = cf.calories !== null ? `${isEstCal ? '~' : ''}${Math.round(cf.calories)} kcal` : '—';
+          const proStr = cf.protein !== null ? `${isEstPro ? '~' : ''}${cf.protein}P` : '—P';
+          const carbStr = cf.carbs !== null ? `${isEstCarb ? '~' : ''}${cf.carbs}C` : '—C';
+          const fatStr = cf.fat !== null ? `${isEstFat ? '~' : ''}${cf.fat}F` : '—F';
+
+          return `
+            <div class="result-ingredient-row is-custom-consumed">
+              <div class="result-ingredient-left">
+                <span class="result-ingredient-name">Custom · ${esc(cf.name)}</span>
+                <span class="result-planned-sub">${cf.amount} ${esc(cf.unit)}</span>
+              </div>
+              <div class="result-ingredient-right">
+                <div class="result-qty-line">
+                  <span class="result-ingredient-qty">${calStr}</span>
+                  <span class="custom-badge">CUSTOM</span>
+                </div>
+                <span class="result-servings">${proStr} / ${carbStr} / ${fatStr}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        unassignedEl.innerHTML = `
+          <div class="result-card">
+            <div class="result-card-header">
+              <span class="result-meal-name">CUSTOM FOODS (UNASSIGNED)</span>
+              <span class="result-meal-pct">${unassigned.length} item${unassigned.length > 1 ? 's' : ''}</span>
+            </div>
+            <div class="result-meal-calories">
+              <span class="result-cal-actual">${Math.round(unassignedCal)}</span>
+              <span class="result-cal-target">kcal</span>
+            </div>
+            <div class="result-ingredients-list">
+              <div class="result-group-header">CONSUMED</div>
+              ${unassignedRows}
+            </div>
+            <div class="result-meal-macros">
+              <span class="result-macro-item">
+                <span class="lbl">P</span>
+                <span class="val">${unassignedPro.toFixed(1)}<span class="unit">g</span></span>
+              </span>
+              <span class="result-macro-divider"></span>
+              <span class="result-macro-item">
+                <span class="lbl">C</span>
+                <span class="val">${unassignedCarb.toFixed(1)}<span class="unit">g</span></span>
+              </span>
+              <span class="result-macro-divider"></span>
+              <span class="result-macro-item">
+                <span class="lbl">F</span>
+                <span class="val">${unassignedFat.toFixed(1)}<span class="unit">g</span></span>
+              </span>
+            </div>
+          </div>
+        `;
+      } else {
+        unassignedEl.innerHTML = '';
+      }
+    }
+
     // Consolidated Daily Summary + Deviation
+    const effectiveTotals = r.combinedTotals || r.totals;
+    const effectiveDeviations = r.combinedDeviations || r.deviations;
+
     const macroLabels = [
       { key: 'calories', label: 'Calories', unit: 'kcal', round: true },
       { key: 'protein', label: 'Protein', unit: 'g', round: false },
@@ -740,9 +1226,9 @@ export const UI = {
     ];
 
     const summaryRows = macroLabels.map(m => {
-      const actual = m.round ? Math.round(r.totals[m.key]) : r.totals[m.key].toFixed(1);
+      const actual = m.round ? Math.round(effectiveTotals[m.key]) : effectiveTotals[m.key].toFixed(1);
       const target = state.targets[m.key];
-      const dev = r.deviations[m.key];
+      const dev = effectiveDeviations[m.key] || { absolute: 0, percentage: 0 };
       const absVal = m.round ? Math.abs(Math.round(dev.absolute)) : Math.abs(dev.absolute).toFixed(1);
       const sign = dev.absolute > 0.001 ? '+' : dev.absolute < -0.001 ? '-' : '';
       const pctVal = Math.abs(dev.percentage).toFixed(1);
@@ -775,12 +1261,42 @@ export const UI = {
         ? `<span class="snapshot-status-badge">Eaten: ${snapshotItemCount !== null ? `${snapshotItemCount} item${snapshotItemCount !== 1 ? 's' : ''} · ` : ''}${snapshotKcal} kcal</span>`
         : '';
 
+      let breakdownBoxHTML = '';
+      if (state.customFoods && state.customFoods.length > 0 && r.customFoodTotals) {
+        const cf = r.customFoodTotals;
+        const pStr = cf.proteinUnknown ? '—' : `${cf.protein.toFixed(1)}g`;
+        const cStr = cf.carbsUnknown ? '—' : `${cf.carbs.toFixed(1)}g`;
+        const fStr = cf.fatUnknown ? '—' : `${cf.fat.toFixed(1)}g`;
+
+        breakdownBoxHTML = `
+          <div class="summary-breakdown-box">
+            <div class="summary-breakdown-row">
+              <span class="summary-breakdown-lbl">TARGET</span>
+              <span>${Math.round(state.targets.calories)} kcal | ${Math.round(state.targets.protein)}P | ${Math.round(state.targets.carbs)}C | ${Math.round(state.targets.fat)}F</span>
+            </div>
+            <div class="summary-breakdown-row">
+              <span class="summary-breakdown-lbl">CUSTOM FOODS</span>
+              <span>${Math.round(cf.calories)} kcal | ${pStr}P | ${cStr}C | ${fStr}F</span>
+            </div>
+            <div class="summary-breakdown-row">
+              <span class="summary-breakdown-lbl">OPTIMIZED FOODS</span>
+              <span>${Math.round(r.totals.calories)} kcal | ${r.totals.protein.toFixed(1)}P | ${r.totals.carbs.toFixed(1)}C | ${r.totals.fat.toFixed(1)}F</span>
+            </div>
+            <div class="summary-breakdown-row is-total">
+              <span class="summary-breakdown-lbl">TOTAL</span>
+              <span>${Math.round(effectiveTotals.calories)} kcal | ${effectiveTotals.protein.toFixed(1)}P | ${effectiveTotals.carbs.toFixed(1)}C | ${effectiveTotals.fat.toFixed(1)}F</span>
+            </div>
+          </div>
+        `;
+      }
+
       dailySummaryEl.innerHTML = `
         <div class="summary-card">
           <div class="summary-header-row">
             <div class="summary-title">Daily Summary</div>
             ${snapshotBadge}
           </div>
+          ${breakdownBoxHTML}
           <div class="consolidated-summary-list">
             ${summaryRows}
           </div>

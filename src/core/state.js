@@ -9,6 +9,7 @@ export const MEALS_KEY = 'macroSolver_meals';
 export const RESULT_KEY = 'macroSolver_result';
 export const WEIGHT_KEY = 'macroSolver_weights';
 export const INTAKE_KEY = 'macroSolver_intake';
+export const CUSTOM_FOODS_KEY = 'macroSolver_customFoods';
 
 export function generateId(prefix = 'id') {
   return `${prefix}_${Math.random().toString(36).substring(2, 8)}_${Date.now().toString(36)}`;
@@ -60,6 +61,7 @@ export const state = {
   eatenItems: {},
   weightHistory: {},
   intakeHistory: {},
+  customFoods: [],
   result: null
 };
 
@@ -117,7 +119,19 @@ export function generateStateFingerprint(customState = state) {
     weights: s.weights || {},
     penalties: s.penalties || {},
     actuals: s.actuals || {},
-    eatenItems: s.eatenItems || {}
+    eatenItems: s.eatenItems || {},
+    customFoods: (s.customFoods || []).map(cf => ({
+      id: cf.id,
+      name: cf.name,
+      amount: cf.amount,
+      unit: cf.unit,
+      calories: cf.calories,
+      protein: cf.protein,
+      carbs: cf.carbs,
+      fat: cf.fat,
+      confidence: cf.confidence,
+      meal: cf.meal
+    }))
   };
 
   const canonicalString = canonicalJsonStringify(canonicalPayload);

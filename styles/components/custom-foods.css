@@ -1,0 +1,440 @@
+/* ══════════════════════════════════════════
+   CUSTOM FOODS & MEALS — Inline entries, forms,
+   and results breakdown
+══════════════════════════════════════════ */
+
+.custom-foods-count-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--silver);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.custom-foods-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Empty State ── */
+.custom-food-empty {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 8px 4px;
+}
+
+/* ── Custom Food List & Entries ── */
+.custom-foods-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-food-entry {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.custom-food-entry:hover {
+  border-color: var(--border-hi);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.custom-food-entry-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.custom-food-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.custom-food-name {
+  font-family: 'Barlow', sans-serif;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--white);
+  letter-spacing: 0.2px;
+}
+
+.custom-food-sub {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--silver);
+}
+
+.custom-food-meal-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--silver);
+}
+
+.custom-food-macros {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.80rem;
+  color: var(--silver);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.custom-food-macros .cf-sep {
+  color: var(--dim);
+}
+
+.custom-food-entry-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.custom-food-confidence-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+
+.custom-food-confidence-badge.has-estimated {
+  color: #e5a93c;
+}
+
+.custom-food-entry-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-cf-action {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--silver);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cf-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  border-color: var(--border-hi);
+}
+
+.btn-cf-remove:hover {
+  color: var(--red-text);
+  border-color: rgba(220, 80, 70, 0.4);
+  background: rgba(200, 60, 50, 0.12);
+}
+
+/* ── Custom Food Totals Row ── */
+.custom-foods-totals-container {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cf-totals-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--silver);
+}
+
+.cf-totals-values {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--white);
+}
+
+/* ── Inline Add/Edit Form ── */
+.custom-food-form-wrap {
+  background: rgba(20, 20, 24, 0.95);
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.cf-form-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--white);
+}
+
+.cf-form-helper {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin-top: -6px;
+}
+
+.cf-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cf-form-field label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--silver);
+}
+
+.cf-input-text,
+.cf-input-num,
+.cf-select {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--white);
+  padding: 8px 10px;
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.cf-input-text:focus,
+.cf-input-num:focus,
+.cf-select:focus {
+  border-color: var(--silver);
+}
+
+.cf-amount-unit-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.cf-macros-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.cf-macro-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cf-macro-col label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--silver);
+  text-align: center;
+}
+
+.cf-macro-col input {
+  text-align: center;
+}
+
+/* Segmented pill for Known vs Estimated */
+.cf-conf-toggle {
+  display: flex;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.cf-conf-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.58rem;
+  padding: 3px 0;
+  text-align: center;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.15s ease;
+}
+
+.cf-conf-btn.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--white);
+  font-weight: 500;
+}
+
+.cf-conf-btn.active.est {
+  color: #e5a93c;
+}
+
+.cf-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.custom-food-add-trigger {
+  width: 100%;
+}
+
+/* ── Result Card Modifications ── */
+.result-group-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.60rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 6px 0 2px 2px;
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.result-group-header:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.result-ingredient-row.is-custom-consumed {
+  border-left: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: default;
+}
+
+.result-ingredient-row.is-custom-consumed:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.custom-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+  color: #e5a93c;
+  background: rgba(229, 169, 60, 0.12);
+  border: 1px solid rgba(229, 169, 60, 0.25);
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+/* ── Plan Adjustment Warning Banner ── */
+.plan-adjustment-card {
+  background: rgba(200, 60, 50, 0.12);
+  border: 1px solid rgba(220, 80, 70, 0.4);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan-adjustment-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--red-text);
+}
+
+.plan-adjustment-body {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--silver);
+}
+
+.plan-adjustment-note {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+/* ── Daily Summary Breakdown Table/Grid ── */
+.summary-breakdown-box {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summary-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--silver);
+}
+
+.summary-breakdown-row.is-total {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 6px;
+  font-weight: 600;
+  color: var(--white);
+}
+
+.summary-breakdown-lbl {
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.summary-breakdown-row.is-total .summary-breakdown-lbl {
+  color: var(--silver);
+}
+
+@media (max-width: 480px) {
+  .cf-macros-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
