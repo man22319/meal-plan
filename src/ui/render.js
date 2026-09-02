@@ -815,9 +815,6 @@ export const UI = {
             Persistence.save();
             UI.renderResults({ scroll: false });
             UI.renderWeightTab();
-            UI._showSnapshotToast(
-              `Logged ${snapshot.eatenItemCount} item${snapshot.eatenItemCount !== 1 ? 's' : ''} · ${Math.round(snapshot.totals.calories)} kcal`
-            );
           } else {
             UI._showSnapshotHint(snapshotBtn, `Snapshot failed: ${res.error}`, 'error');
           }
@@ -1051,30 +1048,6 @@ export const UI = {
   },
   // ── Snapshot feedback helpers ──
 
-  /** Fixed-position toast that slides up, stays 3 s, then fades out. */
-  _showSnapshotToast(message) {
-    // Remove any existing toast first
-    const old = document.getElementById('snapshot-toast');
-    if (old) old.remove();
-
-    const toast = document.createElement('div');
-    toast.id = 'snapshot-toast';
-    toast.className = 'snapshot-toast';
-    toast.setAttribute('role', 'status');
-    toast.setAttribute('aria-live', 'polite');
-    toast.innerHTML = `<span class="snapshot-toast-icon">✓</span> ${esc(message)}`;
-    document.body.appendChild(toast);
-
-    // Trigger enter animation on next frame
-    requestAnimationFrame(() => toast.classList.add('snapshot-toast--visible'));
-
-    const DISPLAY_MS = 2800;
-    const FADE_MS = 350;
-    setTimeout(() => {
-      toast.classList.remove('snapshot-toast--visible');
-      setTimeout(() => toast.remove(), FADE_MS);
-    }, DISPLAY_MS);
-  },
 
   /**
    * Shows a transient inline hint beneath a button.
@@ -1137,6 +1110,7 @@ export const UI = {
     try {
       const outcome = await getRecommendationsAsync(state, {
         limit: 10,
+        groceryLimit: 5,
         onProgress(done, total) {
           if (statusBadge) statusBadge.textContent = `${done}/${total}`;
         }
@@ -1167,32 +1141,43 @@ export const UI = {
       logLines.push(`    Stage 2 Continuous LP Evaluated: ${outcome.auditTrail?.stage2LPEvaluated ?? '0'}`);
       logLines.push(`    Stage 2 Provably Pruned (ΔJ_max < ε): ${outcome.auditTrail?.stage2BoundPruned ?? '0'}`);
       logLines.push(`    Stage 3 Exact MILP Solves: ${outcome.auditTrail?.stage3ExactSolved ?? '0'}`);
-      logLines.push(`    Eligible Recommendations: ${outcome.auditTrail?.eligibleRecommendations ?? outcome.recommendations.length}`);
+      logLines.push(`    Plan Adjustments Found: ${outcome.planAdjustments?.length ?? 0}`);
+      logLines.push(`    Grocery Stocking Items: ${outcome.groceryRecommendations?.length ?? 0}`);
       logLines.push(`    Cascade Execution Time: ${elapsed} ms`);
 
-      logLines.push(`\n[3] RANKED RECOMMENDATIONS:`);
-      if (outcome.recommendations.length > 0) {
-        outcome.recommendations.forEach((r, i) => {
+      logLines.push(`\n[3] GROCERY STOCKING RECOMMENDATIONS (Future Flexibility & Store Shopping):`);
+      if (outcome.groceryRecommendations && outcome.groceryRecommendations.length > 0) {
+        outcome.groceryRecommendations.forEach((g, i) => {
+          logLines.push(`    #${i + 1} [${g.roleLabel || g.role}] ${g.ingredientName} (Score: ${g.score}/100, ${g.urgencyLabel})`);
+          logLines.push(`        Metrics: Density=${g.metrics?.macroDensity} | Flexibility=${g.metrics?.macroFlexibility} | TargetFit=${g.metrics?.targetCompatibility}`);
+          if (g.reasons?.length > 0) {
+            logLines.push(`        Reasons: ${g.reasons.join(' | ')}`);
+          }
+        });
+      } else {
+        logLines.push(`    (No grocery recommendations generated)`);
+      }
+
+      logLines.push(`\n[4] PLAN ADJUSTMENTS (Today's Active Plan Counterfactuals):`);
+      if (outcome.planAdjustments && outcome.planAdjustments.length > 0) {
+        outcome.planAdjustments.forEach((r, i) => {
           logLines.push(`    #${i + 1} [${r.type}] ${r.label}`);
           logLines.push(`        Raw ΔJ = +${r.objectiveImprovement.toFixed(6)} | Visual Score: ${Math.round(r.normalizedScore * 100)}% (tanh mapped)`);
           if (typeof r.lowerBound === 'number') {
             logLines.push(`        LP Bound (J_LP*): ${r.lowerBound.toFixed(6)} | Integrality Gap: ${(r.integralityGapAbs || 0).toFixed(6)} (${((r.integralityGapRel || 0) * 100).toFixed(2)}%)`);
           }
-          if (r.stage1?.geometricScore) {
-            logLines.push(`        Stage 1 Geometry: DirMag=${r.stage1.directionalMagnitude.toFixed(4)}, Alignment=${r.stage1.cosineAlignment.toFixed(4)}, Score=${r.stage1.geometricScore.toFixed(4)}`);
-          }
           logLines.push(`        Macro Deltas: ΔCal=${(r.calorieImprovement || 0).toFixed(1)} kcal, ΔP=${(r.proteinImprovement || 0).toFixed(1)}g, ΔC=${(r.carbImprovement || 0).toFixed(1)}g, ΔF=${(r.fatImprovement || 0).toFixed(1)}g`);
           logLines.push(`        Ingredient Used: ${r.ingredientUsed} | Meals Improved: ${r.mealsImproved}`);
         });
       } else {
-        logLines.push(`    (No eligible recommendations found)`);
+        logLines.push(`    (No eligible plan adjustments found for today's solve)`);
       }
 
-      logLines.push(`\n[4] DECISION EXPLANATIONS:`);
-      logLines.push(`    ★ WHY DID THE TOP RECOMMENDATION WIN?`);
+      logLines.push(`\n[5] DECISION EXPLANATIONS:`);
+      logLines.push(`    WHY DID THE TOP PLAN ADJUSTMENT WIN?`);
       logLines.push(`      ${outcome.auditTrail?.winnerExplanation || 'No winning recommendation.'}`);
 
-      logLines.push(`\n    ✗ WHY WERE THE ALTERNATIVES REJECTED / RANKED LOWER?`);
+      logLines.push(`\n    WHY WERE THE ALTERNATIVES REJECTED / RANKED LOWER?`);
       if (outcome.auditTrail?.rejections && outcome.auditTrail.rejections.length > 0) {
         outcome.auditTrail.rejections.forEach(rej => {
           logLines.push(`      • [${rej.type}] ${rej.label}`);
@@ -1231,7 +1216,7 @@ export const UI = {
       container.innerHTML = `
         <div class="recommend-empty-state">
           <div class="recommend-empty-title">No Analysis Run</div>
-          <div class="recommend-empty-desc">Click "ANALYZE OPPORTUNITIES" above to simulate counterfactual food changes.</div>
+          <div class="recommend-empty-desc">Click "ANALYZE OPPORTUNITIES" above to evaluate grocery stocking staples and plan adjustments.</div>
         </div>
       `;
       return;
@@ -1248,22 +1233,197 @@ export const UI = {
       }
     }
 
-    const recs = cache.recommendations || [];
+    const planRecs = cache.planAdjustments || cache.recommendations || [];
+    const groceryRecs = cache.groceryRecommendations || [];
+
     if (countBadge) {
-      countBadge.textContent = `${recs.length} action${recs.length === 1 ? '' : 's'}`;
+      countBadge.textContent = `${groceryRecs.length} grocery • ${planRecs.length} plan`;
     }
 
     let staleHtml = '';
     if (isStale) {
       staleHtml = `
         <div class="recommend-stale-banner">
-          <span>⚠ Inputs changed since this analysis. Results may be outdated.</span>
+          <span>Inputs changed since this analysis. Results may be outdated.</span>
           <button type="button" class="btn btn-sm" id="reanalyze-btn">Re-analyze</button>
         </div>
       `;
     }
 
-    // Debug log toggle (always available if we have a log)
+    // ── 1. Grocery Recommendations HTML (Monochrome & No Emojis) ──
+    let groceryHtml = '';
+    if (groceryRecs.length > 0) {
+      const groceryCardsHtml = groceryRecs.map((g, idx) => {
+        const roleClass = `role-${(g.role || 'balanced_staple').toLowerCase()}`;
+        const isUrgent = g.availability !== 'normal';
+        const urgencyClass = isUrgent ? '' : 'avail-in_stock';
+        const canRestock = isUrgent;
+
+        const reasonsListHtml = (g.reasons || []).map(r => `
+          <li class="grocery-reason-item">
+            <span class="grocery-reason-bullet">•</span>
+            <span>${esc(r)}</span>
+          </li>
+        `).join('');
+
+        return `
+          <div class="recommend-card grocery-card" data-ing-id="${escAttr(g.ingredientId || g.ingredientName)}">
+            <div class="recommend-card-header">
+              <div class="recommend-badges-wrap">
+                <span class="recommend-rank-badge">#${idx + 1}</span>
+                <span class="recommend-role-badge ${roleClass}">${esc(g.roleLabel || g.role)}</span>
+                <span class="recommend-urgency-badge ${urgencyClass}">${esc(g.urgencyLabel || g.availability)}</span>
+              </div>
+              <span class="recommend-score-pill" title="Grocery Utility Score">${g.score} / 100</span>
+            </div>
+
+            <div class="recommend-card-title">${esc(g.ingredientName)}</div>
+
+            <div class="recommend-transition-row">
+              <span>Per serving:</span>
+              <span class="recommend-to-val">${Math.round(g.calories || 0)} kcal • P:${(g.protein || 0).toFixed(1)}g • C:${(g.carbs || 0).toFixed(1)}g • F:${(g.fat || 0).toFixed(1)}g (${g.servingSize || 100} ${esc(g.unit || 'g')})</span>
+            </div>
+
+            <ul class="grocery-reasons-list">
+              ${reasonsListHtml}
+            </ul>
+
+            <div class="recommend-card-footer">
+              <div class="recommend-summary-hint">
+                Density: ${(g.metrics?.macroDensity || 0).toFixed(2)} | Flexibility: ${(g.metrics?.macroFlexibility || 0).toFixed(2)} | Target Fit: ${(g.metrics?.targetCompatibility || 0).toFixed(2)}
+              </div>
+              ${canRestock ? `
+                <button type="button" class="btn btn-sm btn-apply-grocery" data-ing-id="${escAttr(g.ingredientId || '')}" data-ing-name="${escAttr(g.ingredientName)}">
+                  RESTOCK
+                </button>
+              ` : `
+                <span class="recommend-metric-val neutral" style="font-size:0.75rem;">IN STOCK</span>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      groceryHtml = `
+        <div class="recommend-section-block">
+          <div class="recommend-section-heading-wrap">
+            <div class="recommend-section-heading">GROCERY RECOMMENDATIONS</div>
+            <div class="recommend-section-desc">High-utility pantry staples to stock up on for future meal plan flexibility and minimal solver error.</div>
+          </div>
+          <div class="recommendation-cards-container">
+            ${groceryCardsHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    // ── 2. Plan Adjustments HTML (Explicit Serving Deltas & Monochrome) ──
+    let planHtml = '';
+    if (planRecs.length > 0) {
+      const planCardsHtml = planRecs.map((rec, idx) => {
+        const typeClass = `type-${rec.type.toLowerCase()}`;
+        const typeLabel = rec.type.replace(/_/g, ' ').toUpperCase();
+        const visualScorePct = Math.round((rec.normalizedScore ?? 0) * 100);
+
+        const formatDelta = (val, suffix = '') => {
+          if (typeof val !== 'number' || Math.abs(val) < 0.05) return `<span class="recommend-metric-val neutral">0${suffix}</span>`;
+          const sign = val > 0 ? '+' : '';
+          return `<span class="recommend-metric-val">${sign}${val.toFixed(1)}${suffix}</span>`;
+        };
+
+        // Explicit delta servings calculation: Δs = s_recommended - s_current
+        const fromNum = typeof rec.from === 'number' ? rec.from : null;
+        const toNum = typeof rec.to === 'number' ? rec.to : null;
+        let deltaServings = typeof rec.deltaServings === 'number'
+          ? rec.deltaServings
+          : (toNum !== null && fromNum !== null ? toNum - fromNum : null);
+
+        let actionTitle = esc(rec.label);
+        let transitionText = '';
+
+        if (rec.type === 'INCREASE_CAPACITY') {
+          const deltaAbs = deltaServings !== null ? Math.abs(deltaServings) : (toNum - fromNum);
+          actionTitle = `Increase ${rec.ingredientName} by ${deltaAbs} serving${deltaAbs === 1 ? '' : 's'}`;
+          transitionText = `Current: ${fromNum} serv → Recommended: ${toNum} serv (+${deltaAbs} serv)`;
+        } else if (rec.type === 'REDUCE_CAPACITY') {
+          const deltaAbs = deltaServings !== null ? Math.abs(deltaServings) : (fromNum - toNum);
+          actionTitle = `Decrease ${rec.ingredientName} by ${deltaAbs} serving${deltaAbs === 1 ? '' : 's'}`;
+          transitionText = `Current: ${fromNum} serv → Recommended: ${toNum} serv (-${deltaAbs} serv)`;
+        } else {
+          transitionText = `Current: ${rec.from} → Recommended: ${rec.to}`;
+        }
+
+        return `
+          <div class="recommend-card" data-rec-id="${escAttr(rec.id)}">
+            <div class="recommend-card-header">
+              <div class="recommend-badges-wrap">
+                <span class="recommend-rank-badge">#${idx + 1}</span>
+                <span class="recommend-type-badge ${typeClass}">${esc(typeLabel)}</span>
+              </div>
+              <span class="recommend-score-pill" title="Raw objective improvement: +${rec.objectiveImprovement.toFixed(6)} ΔJ (${visualScorePct}% visual impact score)">${rec.objectiveImprovement >= 0 ? '+' : ''}${rec.objectiveImprovement.toFixed(3)} ΔJ (${visualScorePct}%)</span>
+            </div>
+
+            <div class="recommend-card-title">${actionTitle}</div>
+
+            <div class="recommend-transition-row">
+              <span class="recommend-to-val">${esc(transitionText)}</span>
+            </div>
+
+            <div class="recommend-metrics-grid">
+              <div class="recommend-metric-col">
+                <span class="recommend-metric-label">Calories</span>
+                ${formatDelta(rec.calorieImprovement, ' kcal')}
+              </div>
+              <div class="recommend-metric-col">
+                <span class="recommend-metric-label">Protein</span>
+                ${formatDelta(rec.proteinImprovement, 'g')}
+              </div>
+              <div class="recommend-metric-col">
+                <span class="recommend-metric-label">Carbs</span>
+                ${formatDelta(rec.carbImprovement, 'g')}
+              </div>
+              <div class="recommend-metric-col">
+                <span class="recommend-metric-label">Fat</span>
+                ${formatDelta(rec.fatImprovement, 'g')}
+              </div>
+            </div>
+
+            <div class="recommend-card-footer">
+              <div class="recommend-summary-hint">
+                ${rec.mealsImproved > 0 ? `Improves distribution across ${rec.mealsImproved} meal${rec.mealsImproved === 1 ? '' : 's'}` : 'Expands optimization feasible region'}
+              </div>
+              <button type="button" class="btn btn-sm btn-apply-rec" data-rec-id="${escAttr(rec.id)}">APPLY</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      planHtml = `
+        <div class="recommend-section-block">
+          <div class="recommend-section-heading-wrap">
+            <div class="recommend-section-heading">PLAN ADJUSTMENTS (CURRENT PLAN)</div>
+            <div class="recommend-section-desc">Tactical parameter changes that directly improve today's active meal plan solution.</div>
+          </div>
+          <div class="recommendation-cards-container">
+            ${planCardsHtml}
+          </div>
+        </div>
+      `;
+    } else {
+      planHtml = `
+        <div class="recommend-section-block">
+          <div class="recommend-section-heading-wrap">
+            <div class="recommend-section-heading">PLAN ADJUSTMENTS (CURRENT PLAN)</div>
+            <div class="recommend-section-desc">Tactical parameter changes that directly improve today's active meal plan solution.</div>
+          </div>
+          <div class="recommend-optimal-banner">
+            <strong>Today's meal plan is optimal (0.0 macro error).</strong> No tactical parameter adjustments are needed for today's solve. Check the grocery stocking list above for forward-looking pantry opportunities.
+          </div>
+        </div>
+      `;
+    }
+
+    // Debug log toggle
     let debugHtml = '';
     if (UI.recommendationDebugLog) {
       debugHtml = `
@@ -1274,88 +1434,7 @@ export const UI = {
       `;
     }
 
-    if (recs.length === 0) {
-      container.innerHTML = `
-        ${staleHtml}
-        <div class="recommend-empty-state">
-          <div class="recommend-empty-title">Optimal Macro Landscape</div>
-          <div class="recommend-empty-desc">
-            No single ingredient change provides a meaningful improvement to your current solution.
-          </div>
-        </div>
-        ${debugHtml}
-      `;
-      UI._bindRecommendListeners(cache);
-      return;
-    }
-
-    const cardsHtml = recs.map((rec, idx) => {
-      const typeClass = `type-${rec.type.toLowerCase()}`;
-      const typeLabel = rec.type.replace(/_/g, ' ').toUpperCase();
-      const visualScorePct = Math.round((rec.normalizedScore ?? 0) * 100);
-
-      const formatDelta = (val, suffix = '') => {
-        if (typeof val !== 'number' || Math.abs(val) < 0.05) return `<span class="recommend-metric-val neutral">0${suffix}</span>`;
-        const sign = val > 0 ? '+' : '';
-        return `<span class="recommend-metric-val">${sign}${val.toFixed(1)}${suffix}</span>`;
-      };
-
-      let fromDisplay = rec.from !== null ? String(rec.from) : '—';
-      let toDisplay = rec.to !== null ? String(rec.to) : '—';
-      if (rec.type === 'INCREASE_CAPACITY' || rec.type === 'REDUCE_CAPACITY') {
-        fromDisplay = `${rec.from} serv`;
-        toDisplay = `${rec.to} serv`;
-      }
-
-      return `
-        <div class="recommend-card" data-rec-id="${escAttr(rec.id)}">
-          <div class="recommend-card-header">
-            <div class="recommend-badges-wrap">
-              <span class="recommend-rank-badge">#${idx + 1}</span>
-              <span class="recommend-type-badge ${typeClass}">${esc(typeLabel)}</span>
-            </div>
-            <span class="recommend-score-pill" title="Raw objective improvement: +${rec.objectiveImprovement.toFixed(6)} ΔJ (${visualScorePct}% visual impact score)">${rec.objectiveImprovement >= 0 ? '+' : ''}${rec.objectiveImprovement.toFixed(3)} ΔJ (${visualScorePct}%)</span>
-          </div>
-
-          <div class="recommend-card-title">${esc(rec.ingredientName || rec.label)}</div>
-
-          <div class="recommend-transition-row">
-            <span>Transition:</span>
-            <span class="recommend-from-val">${esc(fromDisplay)}</span>
-            <span class="recommend-arrow">→</span>
-            <span class="recommend-to-val">${esc(toDisplay)}</span>
-          </div>
-
-          <div class="recommend-metrics-grid">
-            <div class="recommend-metric-col">
-              <span class="recommend-metric-label">Calories</span>
-              ${formatDelta(rec.calorieImprovement, ' kcal')}
-            </div>
-            <div class="recommend-metric-col">
-              <span class="recommend-metric-label">Protein</span>
-              ${formatDelta(rec.proteinImprovement, 'g')}
-            </div>
-            <div class="recommend-metric-col">
-              <span class="recommend-metric-label">Carbs</span>
-              ${formatDelta(rec.carbImprovement, 'g')}
-            </div>
-            <div class="recommend-metric-col">
-              <span class="recommend-metric-label">Fat</span>
-              ${formatDelta(rec.fatImprovement, 'g')}
-            </div>
-          </div>
-
-          <div class="recommend-card-footer">
-            <div class="recommend-summary-hint">
-              ${rec.mealsImproved > 0 ? `Improves distribution across ${rec.mealsImproved} meal${rec.mealsImproved === 1 ? '' : 's'}` : 'Expands optimization feasible region'}
-            </div>
-            <button type="button" class="btn btn-sm btn-apply-rec" data-rec-id="${escAttr(rec.id)}">APPLY</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    container.innerHTML = `${staleHtml}${cardsHtml}${debugHtml}`;
+    container.innerHTML = `${staleHtml}${groceryHtml}${planHtml}${debugHtml}`;
     UI._bindRecommendListeners(cache);
   },
 
@@ -1372,10 +1451,12 @@ export const UI = {
       });
     }
 
+    // Bind Plan Adjustment Apply Buttons
     document.querySelectorAll('.btn-apply-rec').forEach(btn => {
       btn.addEventListener('click', function () {
         const recId = this.dataset.recId;
-        const rec = (cache.recommendations || []).find(r => r.id === recId);
+        const planRecs = cache.planAdjustments || cache.recommendations || [];
+        const rec = planRecs.find(r => r.id === recId);
         if (!rec) return;
 
         const applyOutcome = applyRecommendation(state, rec);
@@ -1385,6 +1466,47 @@ export const UI = {
             UI.runRecommendationAnalysis();
           } else {
             UI.showErrors([applyOutcome.message || 'Failed to apply recommendation.']);
+          }
+          return;
+        }
+
+        // Applied successfully
+        UI.renderIngredients();
+        UI.renderMeals();
+        UI.renderTargets();
+        UI.renderResults({ scroll: false });
+        UI.clearErrors();
+
+        // Re-analyze on new state
+        UI.runRecommendationAnalysis();
+      });
+    });
+
+    // Bind Grocery Restock Buttons
+    document.querySelectorAll('.btn-apply-grocery').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const ingId = this.dataset.ingId;
+        const ingName = this.dataset.ingName;
+        const groceryRecs = cache.groceryRecommendations || [];
+        const item = groceryRecs.find(g => (ingId && g.ingredientId === ingId) || g.ingredientName === ingName);
+
+        const recPayload = {
+          type: 'GROCERY_RESTOCK',
+          ingredientId: ingId || item?.ingredientId,
+          ingredientName: ingName || item?.ingredientName,
+          to: 'normal',
+          stateFingerprint: cache.stateFingerprint,
+          candidateData: item ? { ...item, availability: 'normal' } : null,
+          isPoolItem: item?.isPoolItem
+        };
+
+        const applyOutcome = applyRecommendation(state, recPayload);
+        if (!applyOutcome.success) {
+          if (applyOutcome.error === 'STALE_FINGERPRINT') {
+            UI.showErrors(['Recommendation is stale. Re-analyzing...']);
+            UI.runRecommendationAnalysis();
+          } else {
+            UI.showErrors([applyOutcome.message || 'Failed to restock ingredient.']);
           }
           return;
         }

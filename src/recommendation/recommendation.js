@@ -8,8 +8,9 @@ import { Persistence } from '../io/persistence.js';
 import { generateCandidates } from './candidates.js';
 import { simulateCandidates, simulateCandidatesAsync } from './simulation.js';
 import { rankRecommendations, computeSigmoidScore } from './scoring.js';
+import { getGroceryRecommendations } from './grocery.js';
 
-function formatResult(ranked, stateFingerprint, baselineSolve, candidateCount, allSimResults = []) {
+function formatResult(ranked, stateFingerprint, baselineSolve, candidateCount, allSimResults = [], groceryRecs = []) {
   const formattedRecommendations = ranked.map(r => {
     const rawDeltaJ = r.objectiveImprovement ?? 0;
     const sigmoidScore = computeSigmoidScore(rawDeltaJ);
@@ -22,6 +23,7 @@ function formatResult(ranked, stateFingerprint, baselineSolve, candidateCount, a
       label: r.candidate.label,
       from: r.candidate.from,
       to: r.candidate.to,
+      deltaServings: r.candidate.deltaServings ?? (typeof r.candidate.to === 'number' && typeof r.candidate.from === 'number' ? r.candidate.to - r.candidate.from : 0),
       mutation: r.candidate.mutation,
       candidateData: r.candidate.candidateData || null,
       score: sigmoidScore,
@@ -146,6 +148,8 @@ function formatResult(ranked, stateFingerprint, baselineSolve, candidateCount, a
       totals: baselineSolve.result?.totals || null,
       deviations: baselineSolve.result?.deviations || null
     },
+    planAdjustments: formattedRecommendations,
+    groceryRecommendations: groceryRecs,
     recommendations: formattedRecommendations,
     rawSimulations: allSimResults
   };
@@ -154,31 +158,36 @@ function formatResult(ranked, stateFingerprint, baselineSolve, candidateCount, a
 /**
  * Runs end-to-end counterfactual analysis and generates top recommendations (synchronous).
  * @param {object} state - Application state.
- * @param {object} [options] - Options (limit, candidatePool).
- * @returns {object} Recommendation analysis result including fingerprint and ranked recommendations.
+ * @param {object} [options] - Options (limit, groceryLimit, candidatePool, planOnly).
+ * @returns {object} Recommendation analysis result including fingerprint, planAdjustments, and groceryRecommendations.
  */
 export function getRecommendations(state, options = {}) {
   const stateFingerprint = generateStateFingerprint(state);
   const baselineSolve = solveModel(state, { validate: false });
 
-  const candidates = generateCandidates(state, { ...options, baselineSolve });
+  const planOnly = options.planOnly ?? true;
+  const candidates = generateCandidates(state, { ...options, baselineSolve, planOnly });
   const simResults = simulateCandidates(state, candidates, baselineSolve, options);
   const ranked = rankRecommendations(simResults, options);
 
-  return formatResult(ranked, stateFingerprint, baselineSolve, candidates.length, simResults);
+  const groceryLimit = typeof options.groceryLimit === 'number' ? options.groceryLimit : 5;
+  const groceryRecs = getGroceryRecommendations(state, { ...options, limit: groceryLimit });
+
+  return formatResult(ranked, stateFingerprint, baselineSolve, candidates.length, simResults, groceryRecs);
 }
 
 /**
  * Async version of getRecommendations that yields to the event loop between solves.
  * Prevents the browser UI from freezing during analysis.
  * @param {object} state - Application state.
- * @param {object} [options] - Options (limit, candidatePool, onProgress).
+ * @param {object} [options] - Options (limit, groceryLimit, candidatePool, onProgress, planOnly).
  * @returns {Promise<object>} Recommendation analysis result.
  */
 export async function getRecommendationsAsync(state, options = {}) {
   const stateFingerprint = generateStateFingerprint(state);
   const baselineSolve = solveModel(state, { validate: false });
-  const candidates = generateCandidates(state, { ...options, baselineSolve });
+  const planOnly = options.planOnly ?? true;
+  const candidates = generateCandidates(state, { ...options, baselineSolve, planOnly });
 
   const simResults = await simulateCandidatesAsync(
     state, candidates, baselineSolve, options.onProgress || null, options
@@ -186,7 +195,10 @@ export async function getRecommendationsAsync(state, options = {}) {
 
   const ranked = rankRecommendations(simResults, options);
 
-  return formatResult(ranked, stateFingerprint, baselineSolve, candidates.length, simResults);
+  const groceryLimit = typeof options.groceryLimit === 'number' ? options.groceryLimit : 5;
+  const groceryRecs = getGroceryRecommendations(state, { ...options, limit: groceryLimit });
+
+  return formatResult(ranked, stateFingerprint, baselineSolve, candidates.length, simResults, groceryRecs);
 }
 
 /**
@@ -223,17 +235,45 @@ export function applyRecommendation(targetState, recommendation, options = {}) {
   }
 
   // Apply exact state mutation
-  if (recommendation.type === 'RESTOCK') {
+  if (recommendation.type === 'RESTOCK' || recommendation.type === 'GROCERY_RESTOCK') {
+    const targetId = recommendation.ingredientId || recommendation.candidateData?.ingredientId;
+    const targetName = recommendation.ingredientName || recommendation.candidateData?.ingredientName || recommendation.name;
+
     const ing = targetState.ingredients?.find(i =>
-      i.id === recommendation.ingredientId || i.name === recommendation.ingredientName
+      (targetId && i.id === targetId) || (targetName && i.name && i.name.toLowerCase() === targetName.toLowerCase())
     );
     if (!ing) {
-      return { success: false, error: 'INGREDIENT_NOT_FOUND', message: `Ingredient ${recommendation.ingredientName} not found in state.` };
+      // If item is not in targetState ingredients, add it if data is present
+      if (recommendation.candidateData || recommendation.isPoolItem) {
+        if (!targetState.ingredients) targetState.ingredients = [];
+        const source = recommendation.candidateData || recommendation;
+        const newIng = {
+          id: targetId || `ing_${targetState.ingredients.length}`,
+          name: targetName || 'New Ingredient',
+          servingSize: source.servingSize || 100,
+          unit: source.unit || 'g',
+          calories: source.calories || 0,
+          protein: source.protein || 0,
+          carbs: source.carbs || 0,
+          fat: source.fat || 0,
+          minServings: 0,
+          maxServings: 5,
+          quantityMode: 'continuous',
+          availability: 'normal'
+        };
+        ensureId(newIng, 'ing');
+        targetState.ingredients.push(newIng);
+      } else {
+        return { success: false, error: 'INGREDIENT_NOT_FOUND', message: `Ingredient ${targetName} not found in state.` };
+      }
+    } else {
+      ing.availability = recommendation.to || 'normal';
     }
-    ing.availability = recommendation.to;
   } else if (recommendation.type === 'INCREASE_CAPACITY' || recommendation.type === 'REDUCE_CAPACITY') {
+    const targetId = recommendation.ingredientId || recommendation.candidateData?.ingredientId;
+    const targetName = recommendation.ingredientName || recommendation.candidateData?.ingredientName || recommendation.name;
     const ing = targetState.ingredients?.find(i =>
-      i.id === recommendation.ingredientId || i.name === recommendation.ingredientName
+      (targetId && i.id === targetId) || (targetName && i.name && i.name.toLowerCase() === targetName.toLowerCase())
     );
     if (!ing) {
       return { success: false, error: 'INGREDIENT_NOT_FOUND', message: `Ingredient ${recommendation.ingredientName} not found in state.` };
@@ -249,7 +289,7 @@ export function applyRecommendation(targetState, recommendation, options = {}) {
     ensureId(newIng, 'ing');
     targetState.ingredients.push(newIng);
   } else {
-    return { success: false, error: 'UNKNOWN_TYPE', message: `Unknown recommendation type: ${recommendation.type}. Supported types: RESTOCK, INCREASE_CAPACITY, REDUCE_CAPACITY, ADD_INGREDIENT` };
+    return { success: false, error: 'UNKNOWN_TYPE', message: `Unknown recommendation type: ${recommendation.type}. Supported types: RESTOCK, GROCERY_RESTOCK, INCREASE_CAPACITY, REDUCE_CAPACITY, ADD_INGREDIENT` };
   }
 
   // Re-solve on the new mutated state

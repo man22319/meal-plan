@@ -33,6 +33,8 @@ import { generateCandidates, scoreCandidateGeometry } from '../src/recommendatio
 import { simulateCandidates, simulateCandidateLPBound, cloneState, applyCandidateToState } from '../src/recommendation/simulation.js';
 import { isCandidateDominated, pruneDominatedCandidates, rankRecommendations, computeSigmoidScore } from '../src/recommendation/scoring.js';
 import { getRecommendations, applyRecommendation } from '../src/recommendation/recommendation.js';
+import { deriveNutritionalRole, scoreIngredientGroceryUtility, getGroceryRecommendations, NUTRITIONAL_ROLES } from '../src/recommendation/grocery.js';
+import { generateStateFingerprint } from '../src/core/state.js';
 import { solveModel } from '../src/core/solver.js';
 import { PRECISION } from '../src/core/precision.js';
 
@@ -285,11 +287,10 @@ export function runRecommendationTestSuite() {
   // Property Test: Repeatability of full getRecommendations analysis across N runs
   const rep1 = getRecommendations(simState);
   const rep2 = getRecommendations(simState);
-  assert(rep1.recommendations.length === rep2.recommendations.length,
-    'Full recommendation pipeline produces identical recommendation count across runs');
-  assert(rep1.recommendations[0]?.id === rep2.recommendations[0]?.id,
-    `Top recommendation ID is deterministic: ${rep1.recommendations[0]?.id}`);
-
+  assert(rep1.groceryRecommendations.length === rep2.groceryRecommendations.length,
+    'Full recommendation pipeline produces identical grocery recommendation count across runs');
+  assert(rep1.groceryRecommendations[0]?.ingredientName === rep2.groceryRecommendations[0]?.ingredientName,
+    `Top grocery recommendation is deterministic: ${rep1.groceryRecommendations[0]?.ingredientName}`);
 
   // ─────────────────────────────────────────────────────────────────
   // 6. REDUCTION CANDIDATES (OVER-TARGET SCENARIOS)
@@ -331,7 +332,22 @@ export function runRecommendationTestSuite() {
   // ─────────────────────────────────────────────────────────────────
   console.log('\n--- 7. End-to-End Cascade, Audit Trail, Explainability & Apply Tests ---');
 
-  const e2eState = JSON.parse(JSON.stringify(simState));
+  // State with an active capacity opportunity for plan adjustments
+  const e2eState = {
+    targets: { calories: 2000, protein: 150, carbs: 200, fat: 60 },
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: [
+      { id: 'e2e_chicken', name: 'Chicken Breast', servingSize: 100, unit: 'g', calories: 165, protein: 31, carbs: 0, fat: 3.6, minServings: 0, maxServings: 1, availability: 'normal' },
+      { id: 'e2e_rice', name: 'Rice', servingSize: 100, unit: 'g', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, minServings: 0, maxServings: 5, availability: 'normal' },
+      { id: 'e2e_oil_out', name: 'Olive Oil', servingSize: 15, unit: 'mL', calories: 120, protein: 0, carbs: 0, fat: 14, minServings: 0, maxServings: 3, availability: 'out' }
+    ],
+    weights: { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 },
+    penalties: { simplicity: 0.0005, quantity: 0.00001, boundaryExcess: 0.002 },
+    mealConstraints: { minIngredients: 1, maxIngredients: 4 },
+    actuals: {},
+    eatenItems: {}
+  };
+
   const e2eOutcome = getRecommendations(e2eState);
 
   assert(Boolean(e2eOutcome.stateFingerprint),
@@ -347,9 +363,11 @@ export function runRecommendationTestSuite() {
   assert(Array.isArray(e2eOutcome.auditTrail.rejections),
     'Audit trail includes structured rejections array answering why alternatives were rejected');
 
-  // Check top recommendation and APPLY transaction
-  if (e2eOutcome.recommendations.length > 0) {
-    const topRec = e2eOutcome.recommendations[0];
+  // Check top plan adjustment recommendation and APPLY transaction
+  assert(e2eOutcome.planAdjustments.length > 0,
+    `Plan adjustments generated for capacity constrained state: ${e2eOutcome.planAdjustments.length}`);
+  if (e2eOutcome.planAdjustments.length > 0) {
+    const topRec = e2eOutcome.planAdjustments[0];
     assert(Boolean(topRec.stage1) && Boolean(topRec.stage2) && Boolean(topRec.stage3),
       'Top recommendation preserves complete candidate lifecycle (stage1, stage2, stage3)');
     assert(typeof topRec.normalizedScore === 'number' && topRec.normalizedScore > 0,
@@ -364,20 +382,31 @@ export function runRecommendationTestSuite() {
 
     // Verify mutation took effect on the state
     const mutatedItem = e2eState.ingredients.find(i => i.id === topRec.ingredientId || i.name === topRec.ingredientName);
-    if (topRec.type === 'RESTOCK') {
-      assert(mutatedItem?.availability === topRec.to,
-        `State mutation verified: ${mutatedItem?.name} availability is ${mutatedItem?.availability}`);
-    } else if (topRec.type === 'INCREASE_CAPACITY' || topRec.type === 'REDUCE_CAPACITY') {
-      assert(mutatedItem?.maxServings === Number(topRec.to),
-        `State mutation verified: ${mutatedItem?.name} maxServings is ${mutatedItem?.maxServings}`);
-    }
+    assert(mutatedItem?.maxServings === Number(topRec.to),
+      `State mutation verified: ${mutatedItem?.name} maxServings is ${mutatedItem?.maxServings}`);
 
     // Staleness check
     const staleApply = applyRecommendation(e2eState, topRec, { autoPersist: false });
     assert(staleApply.success === false && staleApply.error === 'STALE_FINGERPRINT',
       'Apply fails safely when attempted against a stale state fingerprint');
-  } else {
-    console.log('[SKIP] Application tests - no recommendations generated');
+  }
+
+  // Also verify applying a grocery recommendation restock
+  assert(e2eOutcome.groceryRecommendations.length > 0,
+    `Grocery recommendations generated: ${e2eOutcome.groceryRecommendations.length}`);
+  const outGroceryItem = e2eOutcome.groceryRecommendations.find(g => g.availability === 'out');
+  if (outGroceryItem) {
+    const currentFp2 = generateStateFingerprint(e2eState);
+    const groceryApplyRes = applyRecommendation(e2eState, {
+      type: 'GROCERY_RESTOCK',
+      stateFingerprint: currentFp2,
+      candidateData: { ingredientId: outGroceryItem.ingredientId, ingredientName: outGroceryItem.ingredientName }
+    }, { autoPersist: false });
+    assert(groceryApplyRes.success === true,
+      `Successfully applied grocery restock for ${outGroceryItem.ingredientName}`);
+    const restockedIng = e2eState.ingredients.find(i => i.id === outGroceryItem.ingredientId || i.name === outGroceryItem.ingredientName);
+    assert(restockedIng?.availability === 'normal',
+      `Grocery restock mutated availability to normal: ${restockedIng?.availability}`);
   }
 
 
@@ -517,6 +546,94 @@ export function runRecommendationTestSuite() {
     assert(Number.isInteger(eggItem.servings),
       `Discrete ingredient servings is an exact integer: ${eggItem.servings}`);
   }
+
+  // ─────────────────────────────────────────────────────────────────
+  // 9. GROCERY RECOMMENDATION ENGINE & DIVERSITY LOGIC TESTS
+  // ─────────────────────────────────────────────────────────────────
+  console.log('\n--- 9. Grocery Recommendation Engine & Diversity Logic Tests ---');
+
+  // Test 9.1: Dynamic Role Classification derived purely from nutritional data
+  const testLeanProteinFood = { calories: 120, protein: 26, carbs: 0, fat: 1 };
+  const testCarbFood = { calories: 200, protein: 4, carbs: 45, fat: 1 };
+  const testFatFood = { calories: 180, protein: 2, carbs: 0, fat: 18 };
+  const testBalancedFood = { calories: 150, protein: 10, carbs: 14, fat: 6 };
+
+  assert(deriveNutritionalRole(testLeanProteinFood) === NUTRITIONAL_ROLES.LEAN_PROTEIN,
+    'Derives LEAN_PROTEIN role for food with >= 45% protein calories / high protein density');
+  assert(deriveNutritionalRole(testCarbFood) === NUTRITIONAL_ROLES.CLEAN_CARB,
+    'Derives CLEAN_CARB role for food with >= 55% carbohydrate calories');
+  assert(deriveNutritionalRole(testFatFood) === NUTRITIONAL_ROLES.HEALTHY_FAT,
+    'Derives HEALTHY_FAT role for food with >= 50% fat calories');
+  assert(deriveNutritionalRole(testBalancedFood) === NUTRITIONAL_ROLES.BALANCED_STAPLE,
+    'Derives BALANCED_STAPLE role for multi-macro food');
+
+  // Test 9.2: Structured Utility Score Object Contract
+  const targets9 = { calories: 2000, protein: 150, carbs: 200, fat: 60 };
+  const weights9 = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5 };
+  const utilityEval = scoreIngredientGroceryUtility(testLeanProteinFood, targets9, weights9);
+
+  assert(typeof utilityEval.score === 'number' && utilityEval.score > 0,
+    'Grocery utility returns a valid positive numerical score');
+  assert(Array.isArray(utilityEval.reasons) && utilityEval.reasons.length > 0,
+    'Grocery utility returns structured human-readable reasons from the calculation');
+  assert(typeof utilityEval.metrics?.macroDensity === 'number',
+    'Grocery utility returns macroDensity metric');
+  assert(typeof utilityEval.metrics?.macroFlexibility === 'number',
+    'Grocery utility returns macroFlexibility metric');
+  assert(typeof utilityEval.metrics?.targetCompatibility === 'number',
+    'Grocery utility returns targetCompatibility metric');
+
+  // Test 9.3: 0-Error Plan produces multiple grocery recommendations (e.g. 5)
+  // Even when ΔJ = 0 and plan adjustments are empty, grocery recommendations return 5 stocking opportunities.
+  const zeroErrorPantry = [
+    { id: 'g_p1', name: 'ProteinSourceA', calories: 120, protein: 26, carbs: 0, fat: 1, availability: 'out', servingSize: 100, unit: 'g' },
+    { id: 'g_p2', name: 'ProteinSourceB', calories: 130, protein: 28, carbs: 0, fat: 2, availability: 'low', servingSize: 100, unit: 'g' },
+    { id: 'g_c1', name: 'CarbSourceA', calories: 180, protein: 3, carbs: 42, fat: 0, availability: 'limited', servingSize: 100, unit: 'g' },
+    { id: 'g_c2', name: 'CarbSourceB', calories: 220, protein: 5, carbs: 48, fat: 1, availability: 'normal', servingSize: 100, unit: 'g' },
+    { id: 'g_f1', name: 'FatSourceA', calories: 160, protein: 14, carbs: 0, fat: 12, availability: 'out', servingSize: 100, unit: 'g' },
+    { id: 'g_b1', name: 'BalancedSourceA', calories: 150, protein: 8, carbs: 12, fat: 8, availability: 'normal', servingSize: 100, unit: 'g' }
+  ];
+
+  const zeroErrorState = {
+    targets: targets9,
+    weights: weights9,
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: zeroErrorPantry
+  };
+
+  const fullAnalysisResult = getRecommendations(zeroErrorState, { limit: 10, groceryLimit: 5 });
+
+  assert(Array.isArray(fullAnalysisResult.groceryRecommendations),
+    'Outcome contains groceryRecommendations array');
+  assert(fullAnalysisResult.groceryRecommendations.length === 5,
+    `0-error plan successfully produces exactly 5 grocery recommendations (received ${fullAnalysisResult.groceryRecommendations.length})`);
+  assert(Array.isArray(fullAnalysisResult.planAdjustments),
+    'Outcome contains planAdjustments array (preserving dual collections)');
+  assert(fullAnalysisResult.recommendations === fullAnalysisResult.planAdjustments,
+    'Backwards-compatible recommendations property aliases planAdjustments');
+
+  // Test 9.4: Unutilized ingredients in today's solve can be recommended for grocery stocking
+  // A food with 0 servings in today's solve can still score high and be recommended for future flexibility.
+  const topGroceryItem = fullAnalysisResult.groceryRecommendations[0];
+  assert(Boolean(topGroceryItem && topGroceryItem.score > 0),
+    'Top grocery recommendation has positive utility score regardless of whether it is used in today\'s solve');
+
+  // Test 9.5: Diversity logic ensures representation across different nutritional roles
+  const rolesPresent = new Set(fullAnalysisResult.groceryRecommendations.map(g => g.role));
+  assert(rolesPresent.size >= 3,
+    `Diversity selection includes multiple distinct nutritional roles in top 5 (found ${rolesPresent.size} distinct roles: ${[...rolesPresent].join(', ')})`);
+
+  // Test 9.6: Inventory Urgency Semantics
+  // A nutritionally poor food (e.g. pure sugar / zero protein, low density) that is OUT
+  // should NOT outrank a high-density protein or carb staple that is in stock.
+  const highQualityNormal = { name: 'QualityStaple', calories: 110, protein: 25, carbs: 0, fat: 1, availability: 'normal' };
+  const lowQualityOut = { name: 'JunkFoodOut', calories: 400, protein: 0, carbs: 10, fat: 40, availability: 'out' };
+
+  const evalHighQuality = scoreIngredientGroceryUtility(highQualityNormal, targets9, weights9);
+  const evalLowQuality = scoreIngredientGroceryUtility(lowQualityOut, targets9, weights9);
+
+  assert(evalHighQuality.score > evalLowQuality.score,
+    `Nutritional utility dominates urgency: high-quality staple (${evalHighQuality.score}) outranks low-quality out-of-stock item (${evalLowQuality.score})`);
 
   console.log(`\nRecommendation Test Suite Results: ${passed} passed, ${failed} failed.\n`);
   return { passed, failed };

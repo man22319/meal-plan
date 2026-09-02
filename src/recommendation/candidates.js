@@ -116,9 +116,12 @@ export function generateCandidates(state, options = {}) {
   const hasObjectiveOpportunity = (baselineSolve?.objective ?? Infinity) > PRECISION.OBJECTIVE_EPS;
   const isImprovable = !baselineSolve || !baselineSolve.feasible || hasDeficit || hasExcess || hasMealDeviations || hasObjectiveOpportunity;
 
+  const includeRestock = options.includeRestock ?? (options.planOnly ? false : true);
+  const includePoolAdditions = options.includePoolAdditions ?? (options.planOnly ? false : true);
+
   // 1. Availability Upgrades (RESTOCK) — emit maximal target (→ normal)
-  // Generate RESTOCK whenever state is improvable (deficits, excesses that can be rebalanced, or infeasibility)
-  if (isImprovable) {
+  // Generated only when restock is enabled (excluded from plan-only adjustments)
+  if (isImprovable && includeRestock) {
     ingredients.forEach(ing => {
       const currentAvail = resolveAvailability(ing.availability);
       if (currentAvail === 'normal') return;
@@ -193,6 +196,7 @@ export function generateCandidates(state, options = {}) {
       if (targetMax <= currentMax) return;
 
       const ingId = ing.id || ing.name;
+      const deltaS = targetMax - currentMax;
       const geom = scoreCandidateGeometry(ing, residualDeficit, targets, weights);
 
       candidates.push({
@@ -202,7 +206,8 @@ export function generateCandidates(state, options = {}) {
         ingredientName: ing.name,
         from: currentMax,
         to: targetMax,
-        label: `Increase ${ing.name} max servings (${currentMax} → ${targetMax})`,
+        deltaServings: deltaS,
+        label: `Increase ${ing.name} by ${deltaS} servings (from ${currentMax} to ${targetMax})`,
         mutation: {
           field: 'maxServings',
           value: targetMax
@@ -256,6 +261,7 @@ export function generateCandidates(state, options = {}) {
       if (targetMax >= currentMax) return;
 
       const ingId = ing.id || ing.name;
+      const deltaS = currentMax - targetMax;
       const geom = scoreCandidateGeometry(ing, residualDeficit, targets, weights);
 
       candidates.push({
@@ -265,7 +271,8 @@ export function generateCandidates(state, options = {}) {
         ingredientName: ing.name,
         from: currentMax,
         to: targetMax,
-        label: `Reduce ${ing.name} max servings (${currentMax} → ${targetMax})`,
+        deltaServings: -deltaS,
+        label: `Decrease ${ing.name} by ${deltaS} servings (from ${currentMax} to ${targetMax})`,
         mutation: {
           field: 'maxServings',
           value: targetMax
@@ -282,7 +289,7 @@ export function generateCandidates(state, options = {}) {
 
   // 4. Pool Ingredient Additions (ADD_INGREDIENT) — Stage 1 Heuristic Prioritization
   const candidatePool = options.candidatePool || options.candidateIngredients || [];
-  if (Array.isArray(candidatePool) && candidatePool.length > 0) {
+  if (includePoolAdditions && Array.isArray(candidatePool) && candidatePool.length > 0) {
     const activeNames = new Set(ingredients.map(i => i.name.trim().toLowerCase()));
     const activeIds = new Set(ingredients.map(i => i.id).filter(Boolean));
 
