@@ -191,10 +191,25 @@
         </div>
       </section>
 
-      <!-- ═══ TREND SUMMARY ═══ -->
+      <!-- ═══ WEIGHT TREND SUMMARY ═══ -->
       <section class="section" id="weight-trend-section">
-        <div class="section-header">Trend Summary</div>
+        <div class="section-header">Weight Trend Summary</div>
         <div class="weight-stats-grid" id="weight-stats-grid">
+          <!-- Populated by renderWeightTab() -->
+        </div>
+      </section>
+
+      <!-- ═══ NUTRITIONAL TREND SUMMARY ═══ -->
+      <section class="section" id="nutrition-trend-section">
+        <div class="section-header">
+          <span>Nutritional Trend Summary</span>
+          <div class="nutrition-window-selector" id="nutrition-window-selector" role="group" aria-label="Nutritional trend timeframe">
+            <button type="button" class="nutrition-window-pill active" data-days="7" id="nutr-pill-7">7D</button>
+            <button type="button" class="nutrition-window-pill" data-days="14" id="nutr-pill-14">14D</button>
+            <button type="button" class="nutrition-window-pill" data-days="30" id="nutr-pill-30">30D</button>
+          </div>
+        </div>
+        <div class="nutrition-hero-container" id="nutrition-hero-container">
           <!-- Populated by renderWeightTab() -->
         </div>
       </section>

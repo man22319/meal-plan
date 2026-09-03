@@ -804,6 +804,372 @@
   font-weight: 400;
 }
 
+/* ── NUTRITIONAL TREND SUMMARY (HERO LAYOUT) ── */
+.nutrition-window-selector {
+  display: flex;
+  gap: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.nutrition-window-pill {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 500;
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.nutrition-window-pill:hover {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nutrition-window-pill.active {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--white);
+  font-weight: 600;
+}
+
+.nutrition-hero-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nutrition-hero-card {
+  background: rgba(255, 255, 255, 0.04);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nutrition-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nutrition-hero-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.nutrition-days-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--silver);
+}
+
+.nutrition-days-badge .dim-sub {
+  color: var(--dim);
+  font-size: 0.60rem;
+}
+
+.nutrition-hero-primary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nutrition-hero-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.85rem;
+  font-weight: 600;
+  color: var(--white);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.nutrition-hero-val .hero-unit {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--dim);
+  margin-left: 4px;
+}
+
+.target-diff-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--silver);
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.target-diff-pill.target-match {
+  border-color: rgba(255, 255, 255, 0.30);
+  color: var(--white);
+  font-weight: 500;
+}
+
+.macro-split-bar {
+  display: flex;
+  height: 5px;
+  width: 100%;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  margin-top: 2px;
+}
+
+.macro-bar-seg {
+  height: 100%;
+  transition: width 0.25s ease;
+}
+
+.macro-bar-seg.seg-carbs {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.macro-bar-seg.seg-fat {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.macro-bar-seg.seg-protein {
+  background: rgba(255, 255, 255, 0.20);
+}
+
+.macro-split-incomplete {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--dim);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+.nutrition-macro-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.nutrition-macro-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+}
+
+.nutrition-macro-card .stat-value {
+  font-size: 1.05rem;
+}
+
+.macro-sub-meta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.70rem;
+  color: var(--silver);
+  font-variant-numeric: tabular-nums;
+}
+
+.macro-sub-pct {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.nutrition-empty-card .nutrition-hero-val {
+  margin-bottom: 2px;
+}
+
+.nutrition-hero-empty-msg {
+  font-size: 0.75rem;
+  color: var(--silver);
+}
+
+.nutrition-hero-empty-hint {
+  font-size: 0.68rem;
+  color: var(--dim);
+}
+
+.nutrition-hero-val-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stat-sd-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.70rem;
+  color: var(--silver);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.nutrition-hero-substats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.hero-substat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.substat-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.substat-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.76rem;
+  color: var(--silver);
+  font-variant-numeric: tabular-nums;
+}
+
+.macro-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.macro-sd-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.macro-card-substats {
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.macro-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+}
+
+.macro-stat-row .substat-label {
+  font-size: 0.60rem;
+  color: var(--dim);
+}
+
+.macro-stat-row .substat-val {
+  font-size: 0.65rem;
+  color: var(--silver);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── STATISTICAL BREAKDOWN TABLE ── */
+.nutrition-breakdown-card {
+  background: rgba(255, 255, 255, 0.04);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  margin-top: 4px;
+}
+
+.nutrition-breakdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nutrition-breakdown-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.nutrition-table {
+  width: 100%;
+}
+
+.nutrition-table th {
+  font-size: 0.60rem;
+  padding: 8px 6px;
+}
+
+.nutrition-table td {
+  font-size: 0.72rem;
+  padding: 8px 6px;
+}
+
+.nutrition-table .col-metric {
+  text-align: left;
+  color: var(--white);
+  font-weight: 500;
+}
+
+.nutrition-table .col-mean {
+  color: var(--white);
+  font-weight: 600;
+}
+
+.nutrition-table .col-sd,
+.nutrition-table .col-median,
+.nutrition-table .col-range,
+.nutrition-table .col-target,
+.nutrition-table .col-diff,
+.nutrition-table .col-n {
+  color: var(--silver);
+}
+
+@media (max-width: 480px) {
+  .nutrition-hero-substats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+  .nutrition-macro-card {
+    padding: 8px 6px;
+  }
+  .nutrition-macro-card .stat-value {
+    font-size: 0.95rem;
+  }
+  .nutrition-hero-val {
+    font-size: 1.5rem;
+  }
+}
+
 /* ── LONGITUDINAL HISTORY TABLE ── */
 .history-count-badge {
   font-family: 'IBM Plex Mono', monospace;

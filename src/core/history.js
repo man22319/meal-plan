@@ -120,6 +120,7 @@ export function createIntakeSnapshot(stateObj, dateStr = null, recordedAtStr = n
     return {
       date,
       recordedAt,
+      targets: stateObj?.targets ? { ...stateObj.targets } : null,
       eatenItemCount: 0,
       items: [],
       totals: {
@@ -160,6 +161,7 @@ export function createIntakeSnapshot(stateObj, dateStr = null, recordedAtStr = n
   return {
     date,
     recordedAt,
+    targets: stateObj?.targets ? { ...stateObj.targets } : null,
     eatenItemCount: items.length,
     items,
     totals

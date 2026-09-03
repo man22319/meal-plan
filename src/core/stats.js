@@ -162,30 +162,113 @@ export function calculateWeightTrend(weightHistory, { windowDays = 14, minObserv
 }
 
 /**
+ * Calculates comprehensive longitudinal daily intake statistics over the last `days` window.
+ * Computes independent mean, sample SD, median, min, max, n, and target deviations for each nutrient.
+ */
+export function calculateIntakeStats(intakeHistory, days = 7, referenceDate = null, fallbackTargets = null) {
+  const obs = getIntakeObservations(intakeHistory, days, referenceDate);
+  const nutrients = ['calories', 'protein', 'carbs', 'fat'];
+  const distinctDays = new Set();
+
+  obs.forEach(({ date, totals }) => {
+    if (totals && nutrients.some(k => typeof totals[k] === 'number' && !isNaN(totals[k]))) {
+      distinctDays.add(date);
+    }
+  });
+
+  const result = {
+    distinctDays: distinctDays.size,
+    windowDays: days
+  };
+
+  nutrients.forEach(k => {
+    const values = [];
+    const targets = [];
+
+    obs.forEach(({ totals, rec }) => {
+      const v = totals ? totals[k] : null;
+      if (typeof v === 'number' && !isNaN(v)) {
+        values.push(v);
+        const t = (rec && rec.targets && typeof rec.targets[k] === 'number')
+          ? rec.targets[k]
+          : (fallbackTargets && typeof fallbackTargets[k] === 'number' ? fallbackTargets[k] : null);
+        if (typeof t === 'number' && !isNaN(t)) {
+          targets.push(t);
+        }
+      }
+    });
+
+    const n = values.length;
+    if (n === 0) {
+      result[k] = {
+        n: 0,
+        mean: null,
+        sd: null,
+        median: null,
+        min: null,
+        max: null,
+        target: null,
+        difference: null,
+        percentDifference: null
+      };
+    } else {
+      const sum = values.reduce((acc, curr) => acc + curr, 0);
+      const mean = sum / n;
+
+      let sd = null;
+      if (n >= 2) {
+        const sumSqDiff = values.reduce((acc, curr) => acc + Math.pow(curr - mean, 2), 0);
+        sd = Math.sqrt(sumSqDiff / (n - 1));
+      }
+
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(n / 2);
+      const median = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      const min = sorted[0];
+      const max = sorted[sorted.length - 1];
+
+      let target = null;
+      let difference = null;
+      let percentDifference = null;
+
+      if (targets.length > 0) {
+        target = targets.reduce((acc, curr) => acc + curr, 0) / targets.length;
+        difference = mean - target;
+        percentDifference = target !== 0 ? (difference / target) * 100 : null;
+      }
+
+      result[k] = {
+        n,
+        mean,
+        sd,
+        median,
+        min,
+        max,
+        target,
+        difference,
+        percentDifference
+      };
+    }
+  });
+
+  return result;
+}
+
+/**
  * Calculates average daily intake metrics over the last `days` window.
+ * Preserved for backward compatibility.
  */
 export function calculateAverageIntake(intakeHistory, days = 7, referenceDate = null) {
   const obs = getIntakeObservations(intakeHistory, days, referenceDate);
   if (obs.length === 0) return null;
 
-  const totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
-  const counts = { calories: 0, protein: 0, carbs: 0, fat: 0 };
-  obs.forEach(({ totals: t }) => {
-    ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
-      if (t && typeof t[k] === 'number') {
-        totals[k] += t[k];
-        counts[k]++;
-      }
-    });
-  });
-
-  const count = obs.length;
+  const stats = calculateIntakeStats(intakeHistory, days, referenceDate);
   return {
-    count,
-    calories: counts.calories > 0 ? totals.calories / counts.calories : null,
-    protein: counts.protein > 0 ? totals.protein / counts.protein : null,
-    carbs: counts.carbs > 0 ? totals.carbs / counts.carbs : null,
-    fat: counts.fat > 0 ? totals.fat / counts.fat : null
+    count: obs.length,
+    calories: stats.calories.mean,
+    protein: stats.protein.mean,
+    carbs: stats.carbs.mean,
+    fat: stats.fat.mean
   };
 }
 

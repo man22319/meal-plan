@@ -8,6 +8,7 @@ import {
   calculateCurrentWeight,
   calculateMovingAverage,
   calculateWeightTrend,
+  calculateIntakeStats,
   getCombinedHistoryRows
 } from '../core/stats.js';
 import {
@@ -27,6 +28,7 @@ import {
 
 
 const EPSILON = 0.001;
+let activeNutritionWindowDays = 7;
 
 export function esc(str) {
   const d = document.createElement('div');
@@ -1508,6 +1510,371 @@ export const UI = {
           <div class="stat-value ${rateClass}">${rateDisplay}</div>
         </div>
       `;
+    }
+
+    // ── NUTRITIONAL TREND SUMMARY (HERO LAYOUT) ──
+    const nutritionHeroContainer = document.getElementById('nutrition-hero-container');
+    if (nutritionHeroContainer) {
+      const selector = document.getElementById('nutrition-window-selector');
+      if (selector && !selector.dataset.bound) {
+        selector.dataset.bound = 'true';
+        selector.addEventListener('click', (e) => {
+          const btn = e.target.closest('.nutrition-window-pill');
+          if (!btn) return;
+          const days = parseInt(btn.getAttribute('data-days'), 10);
+          if (!isNaN(days) && days !== activeNutritionWindowDays) {
+            activeNutritionWindowDays = days;
+            UI.renderWeightTab();
+          }
+        });
+      }
+
+      const pills = document.querySelectorAll('.nutrition-window-pill');
+      pills.forEach(pill => {
+        const days = parseInt(pill.getAttribute('data-days'), 10);
+        pill.classList.toggle('active', days === activeNutritionWindowDays);
+      });
+
+      const intakeStats = calculateIntakeStats(
+        state.intakeHistory,
+        activeNutritionWindowDays,
+        today,
+        state.targets
+      );
+
+      const formatNutrient = (key, stat, unit) => {
+        const isKcal = key === 'calories';
+        const fmt = (v) => (v !== null && typeof v === 'number'
+          ? (isKcal ? Math.round(v).toLocaleString() : v.toFixed(1))
+          : '<span class="dim-dash">—</span>');
+
+        const meanDisplay = stat.mean !== null
+          ? `${fmt(stat.mean)} <span class="stat-unit">${unit}</span>`
+          : '<span class="dim-dash">—</span>';
+
+        const sdDisplay = stat.sd !== null
+          ? `±${isKcal ? Math.round(stat.sd).toLocaleString() : stat.sd.toFixed(1)}`
+          : '<span class="dim-dash">—</span>';
+
+        const medianDisplay = stat.median !== null
+          ? `${fmt(stat.median)} <span class="stat-unit">${unit}</span>`
+          : '<span class="dim-dash">—</span>';
+
+        const minDisplay = stat.min !== null ? fmt(stat.min) : '—';
+        const maxDisplay = stat.max !== null ? fmt(stat.max) : '—';
+        const rangeDisplay = (stat.min !== null && stat.max !== null)
+          ? `${minDisplay}–${maxDisplay} <span class="stat-unit">${unit}</span>`
+          : '<span class="dim-dash">—</span>';
+
+        const targetDisplay = stat.target !== null
+          ? `${fmt(stat.target)} <span class="stat-unit">${unit}</span>`
+          : '<span class="dim-dash">—</span>';
+
+        const diffDisplay = stat.difference !== null
+          ? `${stat.difference > 0 ? '+' : ''}${fmt(stat.difference)} <span class="stat-unit">${unit}</span>`
+          : '<span class="dim-dash">—</span>';
+
+        const pctDiffDisplay = stat.percentDifference !== null
+          ? `${stat.percentDifference > 0 ? '+' : ''}${stat.percentDifference.toFixed(1)}%`
+          : '<span class="dim-dash">—</span>';
+
+        return {
+          meanDisplay,
+          sdDisplay,
+          medianDisplay,
+          rangeDisplay,
+          targetDisplay,
+          diffDisplay,
+          pctDiffDisplay,
+          n: stat.n
+        };
+      };
+
+      if (!intakeStats || intakeStats.distinctDays === 0) {
+        nutritionHeroContainer.innerHTML = `
+          <div class="nutrition-hero-card nutrition-empty-card">
+            <div class="nutrition-hero-header">
+              <span class="nutrition-hero-label">AVERAGE DAILY CALORIES</span>
+              <span class="nutrition-days-badge">0 / ${activeNutritionWindowDays} <span class="dim-sub">days logged</span></span>
+            </div>
+            <div class="nutrition-hero-val"><span class="dim-dash">—</span></div>
+            <div class="nutrition-hero-empty-msg">No intake snapshots in this period</div>
+            <div class="nutrition-hero-empty-hint">Record a snapshot from the Solver tab.</div>
+          </div>
+          <div class="nutrition-macro-grid">
+            <div class="stat-card nutrition-macro-card">
+              <div class="stat-label">CARBS</div>
+              <div class="stat-value"><span class="dim-dash">—</span></div>
+              <div class="macro-sub-meta"><span class="dim-dash">—</span></div>
+              <div class="macro-sub-pct"><span class="dim-dash">—</span></div>
+            </div>
+            <div class="stat-card nutrition-macro-card">
+              <div class="stat-label">FAT</div>
+              <div class="stat-value"><span class="dim-dash">—</span></div>
+              <div class="macro-sub-meta"><span class="dim-dash">—</span></div>
+              <div class="macro-sub-pct"><span class="dim-dash">—</span></div>
+            </div>
+            <div class="stat-card nutrition-macro-card">
+              <div class="stat-label">PROTEIN</div>
+              <div class="stat-value"><span class="dim-dash">—</span></div>
+              <div class="macro-sub-meta"><span class="dim-dash">—</span></div>
+              <div class="macro-sub-pct"><span class="dim-dash">—</span></div>
+            </div>
+          </div>
+        `;
+      } else {
+        const cal = formatNutrient('calories', intakeStats.calories, 'kcal');
+        const carbs = formatNutrient('carbs', intakeStats.carbs, 'g');
+        const fat = formatNutrient('fat', intakeStats.fat, 'g');
+        const pro = formatNutrient('protein', intakeStats.protein, 'g');
+
+        let targetBadgeHtml = '';
+        if (intakeStats.calories.mean !== null && intakeStats.calories.target !== null) {
+          const diff = Math.round(intakeStats.calories.difference);
+          const targetVal = Math.round(intakeStats.calories.target).toLocaleString();
+          const sign = diff > 0 ? '+' : '';
+          const diffClass = Math.abs(diff) <= 15 ? 'target-match' : (diff > 0 ? 'target-over' : 'target-under');
+          const pctSign = intakeStats.calories.percentDifference > 0 ? '+' : '';
+          const pctStr = intakeStats.calories.percentDifference !== null
+            ? ` (${pctSign}${intakeStats.calories.percentDifference.toFixed(1)}%)`
+            : '';
+          const label = diff === 0
+            ? `On Target (${targetVal})`
+            : `${sign}${diff} kcal${pctStr} vs target (${targetVal})`;
+          targetBadgeHtml = `<span class="target-diff-pill ${diffClass}">${label}</span>`;
+        }
+
+        const avgCarbs = intakeStats.carbs.mean;
+        const avgFat = intakeStats.fat.mean;
+        const avgProtein = intakeStats.protein.mean;
+
+        const carbKcal = avgCarbs !== null ? avgCarbs * 4 : null;
+        const fatKcal = avgFat !== null ? avgFat * 9 : null;
+        const proteinKcal = avgProtein !== null ? avgProtein * 4 : null;
+
+        const carbsKcalDisplay = carbKcal !== null ? `${Math.round(carbKcal).toLocaleString()} <span class="stat-unit">kcal</span>` : '<span class="dim-dash">—</span>';
+        const fatKcalDisplay = fatKcal !== null ? `${Math.round(fatKcal).toLocaleString()} <span class="stat-unit">kcal</span>` : '<span class="dim-dash">—</span>';
+        const proteinKcalDisplay = proteinKcal !== null ? `${Math.round(proteinKcal).toLocaleString()} <span class="stat-unit">kcal</span>` : '<span class="dim-dash">—</span>';
+
+        let carbsPctDisplay = '<span class="dim-dash">—</span>';
+        let fatPctDisplay = '<span class="dim-dash">—</span>';
+        let proteinPctDisplay = '<span class="dim-dash">—</span>';
+        let macroBarHtml = '';
+
+        const allMacrosKnown = carbKcal !== null && fatKcal !== null && proteinKcal !== null;
+        const anyMacroKnown = carbKcal !== null || fatKcal !== null || proteinKcal !== null;
+
+        if (allMacrosKnown) {
+          const totalMacroKcal = carbKcal + fatKcal + proteinKcal;
+          if (totalMacroKcal > 0) {
+            const carbPct = (carbKcal / totalMacroKcal) * 100;
+            const fatPct = (fatKcal / totalMacroKcal) * 100;
+            const proPct = (proteinKcal / totalMacroKcal) * 100;
+
+            carbsPctDisplay = `${carbPct.toFixed(1)}%`;
+            fatPctDisplay = `${fatPct.toFixed(1)}%`;
+            proteinPctDisplay = `${proPct.toFixed(1)}%`;
+
+            macroBarHtml = `
+              <div class="macro-split-bar" role="progressbar" aria-label="Macro distribution" title="Carbs ${carbPct.toFixed(1)}%, Fat ${fatPct.toFixed(1)}%, Protein ${proPct.toFixed(1)}%">
+                <div class="macro-bar-seg seg-carbs" style="width: ${carbPct}%;"></div>
+                <div class="macro-bar-seg seg-fat" style="width: ${fatPct}%;"></div>
+                <div class="macro-bar-seg seg-protein" style="width: ${proPct}%;"></div>
+              </div>
+            `;
+          }
+        } else if (anyMacroKnown) {
+          macroBarHtml = `
+            <div class="macro-split-incomplete">Macro distribution incomplete (missing nutrient observations)</div>
+          `;
+        }
+
+        const calSdBadgeHtml = intakeStats.calories.sd !== null
+          ? `<span class="stat-sd-tag">SD ${cal.sdDisplay}</span>`
+          : '';
+
+        nutritionHeroContainer.innerHTML = `
+          <!-- HERO CALORIES CARD -->
+          <div class="nutrition-hero-card">
+            <div class="nutrition-hero-header">
+              <span class="nutrition-hero-label">AVERAGE DAILY CALORIES</span>
+              <span class="nutrition-days-badge">${intakeStats.distinctDays} / ${activeNutritionWindowDays} <span class="dim-sub">days logged</span></span>
+            </div>
+            <div class="nutrition-hero-primary-row">
+              <div class="nutrition-hero-val-wrap">
+                <div class="nutrition-hero-val">${cal.meanDisplay} <span class="hero-unit">/day</span></div>
+                ${calSdBadgeHtml}
+              </div>
+              ${targetBadgeHtml}
+            </div>
+
+            <div class="nutrition-hero-substats">
+              <div class="hero-substat">
+                <span class="substat-label">MEDIAN</span>
+                <span class="substat-val">${cal.medianDisplay}</span>
+              </div>
+              <div class="hero-substat">
+                <span class="substat-label">MIN – MAX</span>
+                <span class="substat-val">${cal.rangeDisplay}</span>
+              </div>
+              <div class="hero-substat">
+                <span class="substat-label">AVG % DIFF</span>
+                <span class="substat-val">${cal.pctDiffDisplay}</span>
+              </div>
+              <div class="hero-substat">
+                <span class="substat-label">OBS</span>
+                <span class="substat-val">n = ${cal.n}</span>
+              </div>
+            </div>
+
+            ${macroBarHtml}
+          </div>
+
+          <!-- 3 MACRO CARDS UNDER HERO (CARBS, FAT, PROTEIN) -->
+          <div class="nutrition-macro-grid">
+            <!-- 1. CARBS -->
+            <div class="stat-card nutrition-macro-card">
+              <div class="macro-card-header">
+                <span class="stat-label">CARBS</span>
+                <span class="macro-sd-tag">${carbs.sdDisplay}</span>
+              </div>
+              <div class="stat-value">${carbs.meanDisplay}</div>
+              <div class="macro-sub-meta">${carbsKcalDisplay}</div>
+              <div class="macro-sub-pct">${carbsPctDisplay}</div>
+              <div class="macro-card-substats">
+                <div class="macro-stat-row">
+                  <span class="substat-label">MED</span>
+                  <span class="substat-val">${carbs.medianDisplay}</span>
+                </div>
+                <div class="macro-stat-row">
+                  <span class="substat-label">RANGE</span>
+                  <span class="substat-val">${carbs.rangeDisplay}</span>
+                </div>
+                <div class="macro-stat-row">
+                  <span class="substat-label">% DIFF</span>
+                  <span class="substat-val">${carbs.pctDiffDisplay}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. FAT -->
+            <div class="stat-card nutrition-macro-card">
+              <div class="macro-card-header">
+                <span class="stat-label">FAT</span>
+                <span class="macro-sd-tag">${fat.sdDisplay}</span>
+              </div>
+              <div class="stat-value">${fat.meanDisplay}</div>
+              <div class="macro-sub-meta">${fatKcalDisplay}</div>
+              <div class="macro-sub-pct">${fatPctDisplay}</div>
+              <div class="macro-card-substats">
+                <div class="macro-stat-row">
+                  <span class="substat-label">MED</span>
+                  <span class="substat-val">${fat.medianDisplay}</span>
+                </div>
+                <div class="macro-stat-row">
+                  <span class="substat-label">RANGE</span>
+                  <span class="substat-val">${fat.rangeDisplay}</span>
+                </div>
+                <div class="macro-stat-row">
+                  <span class="substat-label">% DIFF</span>
+                  <span class="substat-val">${fat.pctDiffDisplay}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. PROTEIN -->
+            <div class="stat-card nutrition-macro-card">
+              <div class="macro-card-header">
+                <span class="stat-label">PROTEIN</span>
+                <span class="macro-sd-tag">${pro.sdDisplay}</span>
+              </div>
+              <div class="stat-value">${pro.meanDisplay}</div>
+              <div class="macro-sub-meta">${proteinKcalDisplay}</div>
+              <div class="macro-sub-pct">${proteinPctDisplay}</div>
+              <div class="macro-card-substats">
+                <div class="macro-stat-row">
+                  <span class="substat-label">MED</span>
+                  <span class="substat-val">${pro.medianDisplay}</span>
+                </div>
+                <div class="macro-stat-row">
+                  <span class="substat-label">RANGE</span>
+                  <span class="substat-val">${pro.rangeDisplay}</span>
+                </div>
+                <div class="macro-stat-row">
+                  <span class="substat-label">% DIFF</span>
+                  <span class="substat-val">${pro.pctDiffDisplay}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- COMPACT LONGITUDINAL STATISTICAL BREAKDOWN TABLE -->
+          <div class="card nutrition-breakdown-card">
+            <div class="nutrition-breakdown-header">
+              <span class="nutrition-breakdown-title">STATISTICAL BREAKDOWN</span>
+              <span class="history-count-badge">${intakeStats.distinctDays} / ${activeNutritionWindowDays} days</span>
+            </div>
+            <div class="table-responsive">
+              <table class="history-table nutrition-table">
+                <thead>
+                  <tr>
+                    <th class="col-metric">METRIC</th>
+                    <th class="col-mean">MEAN</th>
+                    <th class="col-sd">SD (±)</th>
+                    <th class="col-median">MEDIAN</th>
+                    <th class="col-range">MIN – MAX</th>
+                    <th class="col-target">TARGET</th>
+                    <th class="col-diff">% DIFF</th>
+                    <th class="col-n">N</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="col-metric">CALORIES</td>
+                    <td class="col-mean">${cal.meanDisplay}</td>
+                    <td class="col-sd">${cal.sdDisplay}</td>
+                    <td class="col-median">${cal.medianDisplay}</td>
+                    <td class="col-range">${cal.rangeDisplay}</td>
+                    <td class="col-target">${cal.targetDisplay}</td>
+                    <td class="col-diff">${cal.pctDiffDisplay}</td>
+                    <td class="col-n">${cal.n}</td>
+                  </tr>
+                  <tr>
+                    <td class="col-metric">CARBS</td>
+                    <td class="col-mean">${carbs.meanDisplay}</td>
+                    <td class="col-sd">${carbs.sdDisplay}</td>
+                    <td class="col-median">${carbs.medianDisplay}</td>
+                    <td class="col-range">${carbs.rangeDisplay}</td>
+                    <td class="col-target">${carbs.targetDisplay}</td>
+                    <td class="col-diff">${carbs.pctDiffDisplay}</td>
+                    <td class="col-n">${carbs.n}</td>
+                  </tr>
+                  <tr>
+                    <td class="col-metric">FAT</td>
+                    <td class="col-mean">${fat.meanDisplay}</td>
+                    <td class="col-sd">${fat.sdDisplay}</td>
+                    <td class="col-median">${fat.medianDisplay}</td>
+                    <td class="col-range">${fat.rangeDisplay}</td>
+                    <td class="col-target">${fat.targetDisplay}</td>
+                    <td class="col-diff">${fat.pctDiffDisplay}</td>
+                    <td class="col-n">${fat.n}</td>
+                  </tr>
+                  <tr>
+                    <td class="col-metric">PROTEIN</td>
+                    <td class="col-mean">${pro.meanDisplay}</td>
+                    <td class="col-sd">${pro.sdDisplay}</td>
+                    <td class="col-median">${pro.medianDisplay}</td>
+                    <td class="col-range">${pro.rangeDisplay}</td>
+                    <td class="col-target">${pro.targetDisplay}</td>
+                    <td class="col-diff">${pro.pctDiffDisplay}</td>
+                    <td class="col-n">${pro.n}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
     }
 
     // Longitudinal History Table (Outer Join)
