@@ -270,3 +270,27 @@ export function isValidCustomFoodEntry(cf) {
 
   return true;
 }
+
+/**
+ * Canonical meal resolver for custom foods.
+ * Resolves a meal reference string (id or name) against the meals list.
+ * Returns { id: string, name: string } if resolved, or null if unassigned.
+ */
+export function resolveMeal(mealRef, meals = state.meals) {
+  if (!mealRef || typeof mealRef !== 'string') return null;
+  const trimmed = mealRef.trim();
+  if (trimmed === '' || trimmed.toLowerCase() === 'unassigned') return null;
+
+  const mealList = Array.isArray(meals) ? meals : [];
+  const found = mealList.find(m =>
+    m.id === trimmed ||
+    m.name === trimmed ||
+    (typeof m.name === 'string' && m.name.toLowerCase() === trimmed.toLowerCase())
+  );
+
+  if (found) {
+    return { id: found.id, name: found.name };
+  }
+
+  return { id: trimmed, name: trimmed };
+}

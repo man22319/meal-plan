@@ -452,10 +452,40 @@ export const ImportExport = {
             return;
           }
           ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
-            if (typeof rec.totals[k] !== 'undefined' && (typeof rec.totals[k] !== 'number' || rec.totals[k] < 0)) {
-              errors.push(`intakeHistory["${date}"].totals.${k} must be a non-negative number.`);
+            const v = rec.totals[k];
+            if (typeof v !== 'undefined' && v !== null && (typeof v !== 'number' || v < 0)) {
+              errors.push(`intakeHistory["${date}"].totals.${k} must be a non-negative number or null.`);
             }
           });
+          ['caloriesUnknown', 'proteinUnknown', 'carbsUnknown', 'fatUnknown'].forEach(k => {
+            const v = rec.totals[k];
+            if (typeof v !== 'undefined' && typeof v !== 'boolean') {
+              errors.push(`intakeHistory["${date}"].totals.${k} must be a boolean.`);
+            }
+          });
+          if (typeof rec.items !== 'undefined') {
+            if (!Array.isArray(rec.items)) {
+              errors.push(`intakeHistory["${date}"].items must be an array.`);
+            } else {
+              rec.items.forEach((it, itIdx) => {
+                if (!it || typeof it !== 'object') {
+                  errors.push(`intakeHistory["${date}"].items[${itIdx}] must be an object.`);
+                  return;
+                }
+                if (typeof it.isCustomFood !== 'undefined' && typeof it.isCustomFood !== 'boolean') {
+                  errors.push(`intakeHistory["${date}"].items[${itIdx}].isCustomFood must be a boolean.`);
+                }
+                if (it.nutrients && typeof it.nutrients === 'object') {
+                  ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
+                    const nv = it.nutrients[k];
+                    if (typeof nv !== 'undefined' && nv !== null && (typeof nv !== 'number' || nv < 0)) {
+                      errors.push(`intakeHistory["${date}"].items[${itIdx}].nutrients.${k} must be a non-negative number or null.`);
+                    }
+                  });
+                }
+              });
+            }
+          }
         });
       }
     }

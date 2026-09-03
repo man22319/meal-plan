@@ -20,6 +20,7 @@ import {
   removeCustomFood,
   aggregateCustomFoods,
   detectInfeasibleDimensions,
+  resolveMeal,
   UNIT_OPTIONS
 } from '../core/customFoods.js';
 
@@ -501,11 +502,8 @@ export const UI = {
 
     listEl.innerHTML = state.customFoods.map(cf => {
       // Find assigned meal name
-      let mealName = 'Unassigned';
-      if (cf.meal && cf.meal !== 'unassigned') {
-        const found = state.meals.find(m => m.id === cf.meal || m.name === cf.meal);
-        mealName = found ? found.name : cf.meal;
-      }
+      const resolved = resolveMeal(cf.meal, state.meals);
+      const mealName = resolved ? resolved.name : 'Unassigned';
 
       // Format macros
       const isEstCal = cf.confidence?.calories === 'estimated';
@@ -965,9 +963,10 @@ export const UI = {
     const cardsEl = document.getElementById('meal-result-cards');
     if (cardsEl) {
       cardsEl.innerHTML = r.mealResults.map((meal, mealIdx) => {
-        const assignedCustom = (state.customFoods || []).filter(cf =>
-          cf.meal === meal.id || cf.meal === meal.name || (cf.meal && cf.meal.toLowerCase() === meal.name.toLowerCase())
-        );
+        const assignedCustom = (state.customFoods || []).filter(cf => {
+          const resolved = resolveMeal(cf.meal, state.meals);
+          return resolved && (resolved.id === meal.id || resolved.name === meal.name);
+        });
         const hasCustom = assignedCustom.length > 0;
 
         const optGroupHeader = hasCustom ? '<div class="result-group-header">OPTIMIZED</div>' : '';
@@ -1141,7 +1140,7 @@ export const UI = {
     // ── Unassigned Custom Foods Result Card ──
     const unassignedEl = document.getElementById('unassigned-custom-cards');
     if (unassignedEl) {
-      const unassigned = (state.customFoods || []).filter(cf => !cf.meal || cf.meal === 'unassigned' || cf.meal.trim() === '');
+      const unassigned = (state.customFoods || []).filter(cf => !resolveMeal(cf.meal, state.meals));
       if (unassigned.length > 0) {
         let unassignedCal = 0, unassignedPro = 0, unassignedCarb = 0, unassignedFat = 0;
         const unassignedRows = unassigned.map(cf => {
@@ -1256,9 +1255,18 @@ export const UI = {
       const isSnapshotted = Boolean(existingSnapshot);
       const snapshotBtnText = isSnapshotted ? 'UPDATE EATEN SNAPSHOT' : 'SNAPSHOT EATEN ITEMS';
       const snapshotItemCount = existingSnapshot?.eatenItemCount ?? null;
-      const snapshotKcal = existingSnapshot ? Math.round(existingSnapshot.totals.calories) : null;
+
+      let snapshotKcalDisplay = '—';
+      if (existingSnapshot && existingSnapshot.totals) {
+        if (typeof existingSnapshot.totals.calories === 'number') {
+          const isCalUnknown = Boolean(existingSnapshot.totals.caloriesUnknown);
+          const rounded = Math.round(existingSnapshot.totals.calories);
+          snapshotKcalDisplay = isCalUnknown ? `≥${rounded} kcal` : `${rounded} kcal`;
+        }
+      }
+
       const snapshotBadge = isSnapshotted
-        ? `<span class="snapshot-status-badge">Eaten: ${snapshotItemCount !== null ? `${snapshotItemCount} item${snapshotItemCount !== 1 ? 's' : ''} · ` : ''}${snapshotKcal} kcal</span>`
+        ? `<span class="snapshot-status-badge"${existingSnapshot?.totals?.caloriesUnknown ? ' title="Known subtotal; contains items with unknown calories"' : ''}>Eaten: ${snapshotItemCount !== null ? `${snapshotItemCount} item${snapshotItemCount !== 1 ? 's' : ''} · ` : ''}${snapshotKcalDisplay}</span>`
         : '';
 
       let breakdownBoxHTML = '';
@@ -1313,15 +1321,9 @@ export const UI = {
         snapshotBtn.addEventListener('click', () => {
           const snapshot = createIntakeSnapshot(state, today);
 
-          // No solver result at all
-          if (!snapshot) {
-            UI._showSnapshotHint(snapshotBtn, 'No solver result — press SOLVE first.', 'error');
-            return;
-          }
-
-          // No EATEN items — nothing to record
-          if (snapshot.eatenItemCount === 0) {
-            UI._showSnapshotHint(snapshotBtn, 'Mark items as EATEN first (hold an ingredient row).', 'warn');
+          // No items to record
+          if (!snapshot || snapshot.eatenItemCount === 0) {
+            UI._showSnapshotHint(snapshotBtn, 'Mark items as EATEN first (hold an ingredient row) or add custom foods.', 'warn');
             return;
           }
 
@@ -1522,10 +1524,10 @@ export const UI = {
       } else {
         const tableRows = rows.map(r => {
           const wStr = r.hasWeight ? `${r.weight.toFixed(1)}` : '<span class="dim-dash">—</span>';
-          const calStr = r.hasIntake ? `${Math.round(r.calories)}` : '<span class="dim-dash">—</span>';
-          const proStr = r.hasIntake ? `${r.protein.toFixed(1)}g` : '<span class="dim-dash">—</span>';
-          const carbStr = r.hasIntake ? `${r.carbs.toFixed(1)}g` : '<span class="dim-dash">—</span>';
-          const fatStr = r.hasIntake ? `${r.fat.toFixed(1)}g` : '<span class="dim-dash">—</span>';
+          const calStr = r.hasIntake ? (typeof r.calories === 'number' ? `${Math.round(r.calories)}` : '<span class="dim-dash">—</span>') : '<span class="dim-dash">—</span>';
+          const proStr = r.hasIntake ? (typeof r.protein === 'number' ? `${r.protein.toFixed(1)}g` : '<span class="dim-dash">—</span>') : '<span class="dim-dash">—</span>';
+          const carbStr = r.hasIntake ? (typeof r.carbs === 'number' ? `${r.carbs.toFixed(1)}g` : '<span class="dim-dash">—</span>') : '<span class="dim-dash">—</span>';
+          const fatStr = r.hasIntake ? (typeof r.fat === 'number' ? `${r.fat.toFixed(1)}g` : '<span class="dim-dash">—</span>') : '<span class="dim-dash">—</span>';
 
           const parts = r.date.split('-');
           const displayDate = parts.length === 3 ? `${parts[1]}/${parts[2]}/${parts[0].slice(2)}` : r.date;

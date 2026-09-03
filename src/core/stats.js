@@ -77,7 +77,7 @@ export function getIntakeObservations(intakeHistory, windowDays = null, referenc
       const totals = rec?.totals;
       return { date, ms, totals, rec };
     })
-    .filter(e => !isNaN(e.ms) && e.totals && typeof e.totals.calories === 'number')
+    .filter(e => !isNaN(e.ms) && e.totals && (typeof e.totals.calories === 'number' || e.totals.calories === null))
     .sort((a, b) => a.ms - b.ms);
 
   if (entries.length === 0) return [];
@@ -169,20 +169,23 @@ export function calculateAverageIntake(intakeHistory, days = 7, referenceDate = 
   if (obs.length === 0) return null;
 
   const totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const counts = { calories: 0, protein: 0, carbs: 0, fat: 0 };
   obs.forEach(({ totals: t }) => {
-    totals.calories += t.calories || 0;
-    totals.protein += t.protein || 0;
-    totals.carbs += t.carbs || 0;
-    totals.fat += t.fat || 0;
+    ['calories', 'protein', 'carbs', 'fat'].forEach(k => {
+      if (t && typeof t[k] === 'number') {
+        totals[k] += t[k];
+        counts[k]++;
+      }
+    });
   });
 
   const count = obs.length;
   return {
     count,
-    calories: totals.calories / count,
-    protein: totals.protein / count,
-    carbs: totals.carbs / count,
-    fat: totals.fat / count
+    calories: counts.calories > 0 ? totals.calories / counts.calories : null,
+    protein: counts.protein > 0 ? totals.protein / counts.protein : null,
+    carbs: counts.carbs > 0 ? totals.carbs / counts.carbs : null,
+    fat: counts.fat > 0 ? totals.fat / counts.fat : null
   };
 }
 
