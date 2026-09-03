@@ -5,13 +5,19 @@
 
 .custom-foods-count-badge {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--silver);
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--border);
-  padding: 2px 8px;
-  border-radius: 12px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: right;
+  line-height: 1;
 }
 
 .custom-foods-card {
@@ -454,3 +460,24 @@
     grid-template-columns: 120px 1fr;
   }
 }
+
+/* ── Remove All Button ── */
+.btn-cf-remove-all {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  background: transparent;
+  border: 1px solid rgba(220, 80, 70, 0.35);
+  color: var(--red-text, #e05555);
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cf-remove-all:hover {
+  background: rgba(200, 60, 50, 0.15);
+  border-color: rgba(220, 80, 70, 0.65);
+  color: #ff6b6b;
+}
+

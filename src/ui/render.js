@@ -479,6 +479,9 @@ export const UI = {
     const countBadge = document.getElementById('custom-foods-count');
     const totalsContainer = document.getElementById('custom-foods-totals-container');
     const addBtn = document.getElementById('add-custom-food-btn');
+    const removeAllBtn = document.getElementById('remove-all-custom-foods-btn');
+
+    const hasItems = Boolean(state.customFoods && state.customFoods.length > 0);
 
     if (countBadge) {
       countBadge.textContent = String(state.customFoods ? state.customFoods.length : 0);
@@ -489,6 +492,26 @@ export const UI = {
       addBtn.addEventListener('click', () => {
         UI.openCustomFoodForm();
       });
+    }
+
+    if (removeAllBtn) {
+      // Toggle visibility
+      removeAllBtn.classList.toggle('hidden', !hasItems);
+
+      // Bind once
+      if (!removeAllBtn.dataset.bound) {
+        removeAllBtn.dataset.bound = 'true';
+        removeAllBtn.addEventListener('click', () => {
+          if (!state.customFoods || state.customFoods.length === 0) return;
+          const count = state.customFoods.length;
+          const label = count === 1 ? '1 custom food' : `${count} custom foods`;
+          if (!window.confirm(`Remove all ${label}? This cannot be undone.`)) return;
+          state.customFoods.length = 0;
+          Persistence.save();
+          UI.renderCustomFoods();
+          UI.markSolutionStale();
+        });
+      }
     }
 
     if (!listEl) return;
