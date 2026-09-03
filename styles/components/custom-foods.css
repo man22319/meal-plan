@@ -400,25 +400,34 @@
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  padding: 10px;
+  padding: 10px 12px;
   margin-bottom: 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .summary-breakdown-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: baseline;
+  column-gap: 10px;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   color: var(--silver);
+}
+
+.summary-breakdown-row > span:last-child {
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .summary-breakdown-row.is-total {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 6px;
+  padding-top: 7px;
+  margin-top: 1px;
   font-weight: 600;
   color: var(--white);
 }
@@ -427,6 +436,9 @@
   letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .summary-breakdown-row.is-total .summary-breakdown-lbl {
@@ -436,5 +448,9 @@
 @media (max-width: 480px) {
   .cf-macros-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .summary-breakdown-row {
+    grid-template-columns: 120px 1fr;
   }
 }
