@@ -601,8 +601,8 @@ export const UI = {
     const isEdit = Boolean(food);
 
     const nameVal = isEdit ? food.name : '';
-    const amountVal = isEdit ? food.amount : 1;
-    const unitVal = isEdit ? food.unit : 'wrap';
+    const amountVal = isEdit ? food.amount : '';
+    const unitVal = isEdit ? food.unit : '';
     const calVal = isEdit && food.calories !== null ? food.calories : '';
     const proVal = isEdit && food.protein !== null ? food.protein : '';
     const carbVal = isEdit && food.carbs !== null ? food.carbs : '';
@@ -625,7 +625,7 @@ export const UI = {
       <div class="cf-amount-unit-row">
         <div class="cf-form-field">
           <label for="cf-input-amount">Amount</label>
-          <input type="number" id="cf-input-amount" class="cf-input-num" min="0.01" step="any" placeholder="1" value="${amountVal}" inputmode="decimal" />
+          <input type="number" id="cf-input-amount" class="cf-input-num" min="0.01" step="any" placeholder="1" value="${escAttr(String(amountVal))}" inputmode="decimal" />
         </div>
         <div class="cf-form-field">
           <label for="cf-input-unit">Unit</label>
