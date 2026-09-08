@@ -1451,10 +1451,11 @@ export const UI = {
     const eatTotals = consumption.eatenTotals;
 
     const rowsHTML = consumption.items.map(item => {
-      const isCompleted = item.remainingAmount <= 0.001;
+      const roundedRemaining = Math.round(item.remainingAmount || 0);
+      const isCompleted = roundedRemaining <= 0;
       const remValFormatted = isCompleted
         ? `<span class="remaining-zero-badge">0 ${esc(item.unit)}</span>`
-        : `${Math.round(item.remainingAmount * 10) / 10} ${esc(item.unit)}`;
+        : `${roundedRemaining} ${esc(item.unit)}`;
 
       const customBadge = item.custom ? '<span class="custom-badge">CUSTOM</span>' : '';
       const unplannedBadge = item.unplanned ? '<span class="unplanned-tag">UNPLANNED</span>' : '';
@@ -1469,7 +1470,7 @@ export const UI = {
             </span>
           </td>
           <td class="col-planned">
-            ${Math.round(item.plannedAmount * 10) / 10} ${esc(item.unit)}
+            ${Math.round(item.plannedAmount || 0)} ${esc(item.unit)}
           </td>
           <td class="col-ate">
             <div class="ate-input-cell">
@@ -1594,14 +1595,15 @@ export const UI = {
     consumption.items.forEach(item => {
       const row = container.querySelector(`.consumption-row[data-food-id="${item.foodDefinitionId}"]`);
       if (row) {
-        const isCompleted = item.remainingAmount <= 0.001;
+        const roundedRemaining = Math.round(item.remainingAmount || 0);
+        const isCompleted = roundedRemaining <= 0;
         row.classList.toggle('is-completed', isCompleted);
 
         const remTd = row.querySelector('.col-remaining');
         if (remTd) {
           remTd.innerHTML = isCompleted
             ? `<span class="remaining-zero-badge">0 ${esc(item.unit)}</span>`
-            : `${Math.round(item.remainingAmount * 10) / 10} ${esc(item.unit)}`;
+            : `${roundedRemaining} ${esc(item.unit)}`;
         }
       }
     });

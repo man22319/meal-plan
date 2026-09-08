@@ -10,6 +10,7 @@ import {
   duplicateMealItem
 } from '../src/core/consumption.js';
 import { Persistence } from '../src/io/persistence.js';
+import { UI } from '../src/ui/render.js';
 
 // Global mock solver and localStorage if in Node environment
 import fs from 'node:fs';
@@ -493,4 +494,81 @@ export function runConsumptionTestSuite() {
 
     console.log('[CS-9] Consumption State Persistence Lifecycle: PASSED');
   }
+
+  // ── TEST 10: Consolidated Consumption planned and remaining amounts rounded to whole numbers ──
+  {
+    resetTestState();
+    let html = '';
+    const containerEl = {
+      get innerHTML() { return html; },
+      set innerHTML(v) { html = v; },
+      classList: { add: () => {}, remove: () => {} },
+      querySelector: () => null,
+      querySelectorAll: () => []
+    };
+
+    if (typeof global.document === 'undefined') {
+      global.document = {
+        createElement: (tag) => ({ tag, textContent: '', set innerHTML(v) {}, get innerHTML() { return this.textContent; } }),
+        getElementById: () => null
+      };
+    }
+
+    const origGetById = global.document.getElementById;
+    global.document.getElementById = (id) => (id === 'consumption-container' ? containerEl : null);
+
+    state.result = {
+      mealResults: [{
+        id: 'm1',
+        name: 'Breakfast',
+        items: [{
+          id: 'chicken',
+          name: 'Chicken',
+          plannedQuantity: 124.6,
+          quantity: 124.6,
+          unit: 'g',
+          servingSize: 100,
+          calories: 205,
+          protein: 38.6,
+          carbs: 0,
+          fat: 4.5
+        }]
+      }]
+    };
+    state.customFoods = [];
+    state.ateSoFar = { chicken: 40.2 };
+    state.ingredients = [];
+
+    UI.renderConsumptionCard();
+
+    const plannedMatch = html.match(/class="col-planned"[\s\S]*?>([\s\S]*?)<\/td>/);
+    const remainingMatch = html.match(/class="col-remaining"[\s\S]*?>([\s\S]*?)<\/td>/);
+
+    const plannedText = plannedMatch ? plannedMatch[1].trim() : '';
+    const remainingText = remainingMatch ? remainingMatch[1].trim() : '';
+
+    assert.strictEqual(plannedText, '125 g', 'Planned 124.6g must round to whole number 125 g (no tenths)');
+    assert.strictEqual(remainingText, '84 g', 'Remaining 84.4g must round to whole number 84 g (no tenths)');
+
+    // Dynamic row update in updateConsumptionDisplay
+    const remTdEl = { innerHTML: '' };
+    const rowEl = {
+      classList: { toggle: () => {} },
+      querySelector: (sel) => (sel === '.col-remaining' ? remTdEl : null)
+    };
+    containerEl.querySelector = (sel) => (sel.includes('chicken') ? rowEl : null);
+
+    state.ateSoFar = { chicken: 50 };
+    UI.updateConsumptionDisplay(containerEl);
+    assert.strictEqual(remTdEl.innerHTML, '75 g', 'Dynamic update rounds 74.6g to whole number 75 g');
+
+    global.document.getElementById = origGetById;
+    console.log('[CS-10] Consolidated Consumption Whole Number Rounding: PASSED');
+  }
 }
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  runConsumptionTestSuite();
+}
+
+
