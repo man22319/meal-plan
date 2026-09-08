@@ -1,0 +1,322 @@
+/* ══════════════════════════════════════════
+   CONSUMPTION — Consolidated foods & "Ate So Far" styles
+   ══════════════════════════════════════════ */
+
+.consumption-container {
+  margin-bottom: 10px;
+}
+
+.consumption-card {
+  background: rgba(255, 255, 255, 0.03);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.consumption-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.consumption-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.consumption-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--white);
+}
+
+.consumption-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.consumption-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-clear-ate {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--silver);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-ate:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--white);
+  border-color: var(--border-hi);
+}
+
+/* ── REMAINING MACRO HERO BANNER ── */
+.remaining-hero-banner {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.remaining-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.remaining-hero-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--silver);
+}
+
+.remaining-hero-sub {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--dim);
+}
+
+.remaining-macro-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.remaining-macro-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.remaining-macro-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.remaining-macro-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+}
+
+.remaining-macro-val .unit {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--dim);
+  margin-left: 6px;
+  letter-spacing: 0.5px;
+}
+
+/* ── CONSOLIDATED INGREDIENTS TABLE ── */
+.consumption-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.consumption-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.80rem;
+}
+
+.consumption-table th {
+  text-align: left;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.consumption-table td {
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.consumption-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.consumption-row.is-completed td {
+  opacity: 0.65;
+}
+
+.col-food {
+  display: flex;
+  align-items: center;
+  min-width: 140px;
+}
+
+.consumption-food-name {
+  font-family: 'Barlow', sans-serif;
+  font-weight: 500;
+  font-size: 0.88rem;
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unplanned-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.60rem;
+  color: var(--red-text);
+  background: var(--red);
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.col-planned {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.84rem;
+  color: var(--silver);
+  white-space: nowrap;
+}
+
+.col-ate {
+  white-space: nowrap;
+}
+
+.ate-input-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Crisp single-border styling, avoiding double-box artifacts */
+input[type="number"].ate-so-far-input {
+  width: 76px;
+  height: 32px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--white);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  text-align: right;
+  transition: all 0.15s ease;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type="number"].ate-so-far-input::-webkit-outer-spin-button,
+input[type="number"].ate-so-far-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"].ate-so-far-input:focus {
+  border-color: var(--border-hi);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.ate-input-unit {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  min-width: 22px;
+}
+
+.col-remaining {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--white);
+  white-space: nowrap;
+}
+
+.remaining-zero-badge {
+  color: var(--green-text);
+  font-weight: 600;
+}
+
+/* ── COPY MEAL BUTTON IN RESULT CARD HEADER ── */
+.btn-copy-meal {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--silver);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: all 0.15s ease;
+}
+
+.btn-copy-meal:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--white);
+  border-color: var(--border-hi);
+}
+
+.btn-copy-meal:active {
+  transform: scale(0.97);
+}
+
+@media (max-width: 600px) {
+  .remaining-macro-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

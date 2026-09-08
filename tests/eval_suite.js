@@ -37,8 +37,12 @@ import { runUneatenAllTestSuite } from './uneaten_all.test.js';
 import { runRecommendationTestSuite } from './recommendation.test.js';
 import { runIngredientSearchTestSuite } from './ingredient_search.test.js';
 import { runCustomFoodsTestSuite } from './custom_foods.test.js';
+import { runConsumptionTestSuite } from './consumption.test.js';
+import { runSolverTestSuite } from './solver.test.js';
 
+runSolverTestSuite();
 runCustomFoodsTestSuite();
+runConsumptionTestSuite();
 runRecommendationTestSuite();
 runIngredientSearchTestSuite();
 

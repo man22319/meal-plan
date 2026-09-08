@@ -15,6 +15,7 @@ import {
   WEIGHT_KEY,
   INTAKE_KEY,
   CUSTOM_FOODS_KEY,
+  CONSUMPTION_KEY,
   DEFAULT_INGREDIENTS,
   DEFAULT_TARGETS,
   DEFAULT_MEALS
@@ -34,6 +35,7 @@ export const Persistence = {
       localStorage.setItem(WEIGHT_KEY, JSON.stringify(state.weightHistory || {}));
       localStorage.setItem(INTAKE_KEY, JSON.stringify(state.intakeHistory || {}));
       localStorage.setItem(CUSTOM_FOODS_KEY, JSON.stringify(state.customFoods || []));
+      localStorage.setItem(CONSUMPTION_KEY, JSON.stringify(state.ateSoFar || {}));
       if (state.result) {
         localStorage.setItem(RESULT_KEY, JSON.stringify({
           ...state.result,
@@ -156,6 +158,18 @@ export const Persistence = {
         }
       }
 
+      const rawConsumption = localStorage.getItem(CONSUMPTION_KEY);
+      if (rawConsumption) {
+        try {
+          const parsedConsumption = JSON.parse(rawConsumption);
+          if (parsedConsumption && typeof parsedConsumption === 'object' && !Array.isArray(parsedConsumption)) {
+            state.ateSoFar = parsedConsumption;
+          }
+        } catch {
+          state.ateSoFar = {};
+        }
+      }
+
       const rawResult = localStorage.getItem(RESULT_KEY);
       if (rawResult) {
         const parsedResult = JSON.parse(rawResult);
@@ -185,18 +199,20 @@ export const Persistence = {
       localStorage.removeItem(WEIGHT_KEY);
       localStorage.removeItem(INTAKE_KEY);
       localStorage.removeItem(CUSTOM_FOODS_KEY);
+      localStorage.removeItem(CONSUMPTION_KEY);
       localStorage.removeItem(RESULT_KEY);
     } catch {}
     state.targets = JSON.parse(JSON.stringify(DEFAULT_TARGETS));
     state.meals = JSON.parse(JSON.stringify(DEFAULT_MEALS));
     state.ingredients = JSON.parse(JSON.stringify(DEFAULT_INGREDIENTS));
     state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
-    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
+    state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2, macroReconciliation: 0.5 };
     state.actuals = {};
     state.eatenItems = {};
     state.weightHistory = {};
     state.intakeHistory = {};
     state.customFoods = [];
+    state.ateSoFar = {};
     state.result = null;
   }
 };
@@ -226,11 +242,13 @@ export const ImportExport = {
         protein: state.weights?.protein ?? 1.0,
         carbs: state.weights?.carbs ?? 0.5,
         fat: state.weights?.fat ?? 0.5,
-        mealAllocation: state.weights?.mealAllocation ?? 0.2
+        mealAllocation: state.weights?.mealAllocation ?? 0.2,
+        macroReconciliation: state.weights?.macroReconciliation ?? 0.5
       },
       weightHistory: state.weightHistory || {},
       intakeHistory: state.intakeHistory || {},
-      customFoods: state.customFoods || []
+      customFoods: state.customFoods || [],
+      ateSoFar: state.ateSoFar || {}
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -279,8 +297,8 @@ export const ImportExport = {
         }
 
         if (parsed.weights && typeof parsed.weights === 'object') {
-          if (!state.weights) state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2 };
-          ['calories', 'protein', 'carbs', 'fat', 'mealAllocation'].forEach(k => {
+          if (!state.weights) state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2, macroReconciliation: 0.5 };
+          ['calories', 'protein', 'carbs', 'fat', 'mealAllocation', 'macroReconciliation'].forEach(k => {
             if (typeof parsed.weights[k] === 'number') {
               state.weights[k] = parsed.weights[k];
             }
@@ -299,6 +317,12 @@ export const ImportExport = {
           state.customFoods = parsed.customFoods.filter(isValidCustomFoodEntry);
         } else {
           state.customFoods = [];
+        }
+
+        if (parsed.ateSoFar && typeof parsed.ateSoFar === 'object' && !Array.isArray(parsed.ateSoFar)) {
+          state.ateSoFar = parsed.ateSoFar;
+        } else {
+          state.ateSoFar = {};
         }
 
         state.eatenItems = {};
@@ -407,7 +431,7 @@ export const ImportExport = {
         errors.push('weights must be an object.');
       } else {
         const w = data.weights;
-        ['calories', 'protein', 'carbs', 'fat', 'mealAllocation'].forEach(k => {
+        ['calories', 'protein', 'carbs', 'fat', 'mealAllocation', 'macroReconciliation'].forEach(k => {
           if (typeof w[k] !== 'undefined') {
             if (typeof w[k] !== 'number' || isNaN(w[k]) || w[k] < 0) {
               errors.push(`weights.${k} must be a non-negative number.`);

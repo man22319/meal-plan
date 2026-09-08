@@ -24,6 +24,11 @@ import {
   resolveMeal,
   UNIT_OPTIONS
 } from '../core/customFoods.js';
+import {
+  aggregateIngredients,
+  calculateConsumption
+} from '../core/consumption.js';
+import { formatPercent } from '../core/formatters.js';
 
 
 
@@ -150,7 +155,7 @@ export const UI = {
     const isValid = Math.abs(total - 100) < EPSILON;
     const el = document.getElementById('meal-total-value');
     if (el) {
-      el.textContent = `${total.toFixed(1)}%`;
+      el.textContent = formatPercent(total, 1, false);
       el.className = 'meal-total-value ' + (isValid ? 'valid' : 'invalid');
     }
 
@@ -1079,6 +1084,7 @@ export const UI = {
           <div class="result-card" data-meal-id="${escAttr(meal.id || mealIdx)}" data-meal-idx="${mealIdx}">
             <div class="result-card-header">
               <span class="result-meal-name">${esc(meal.name)}</span>
+              <button type="button" class="btn-copy-meal" data-meal-id="${escAttr(meal.id || mealIdx)}" title="Copy this meal">Copy</button>
               <span class="result-meal-pct">${meal.pct}%</span>
             </div>
             <div class="result-meal-calories">
@@ -1109,6 +1115,22 @@ export const UI = {
           </div>
         `;
       }).join('');
+
+      cardsEl.querySelectorAll('.btn-copy-meal').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const mealId = btn.dataset.mealId;
+          const res = Optimization.copyMeal(mealId);
+          if (res.error) {
+            UI.showErrors([res.error]);
+            return;
+          }
+          Persistence.save();
+          UI.renderMeals();
+          UI.renderCustomFoods();
+          UI.renderResults({ scroll: false });
+        });
+      });
 
       cardsEl.querySelectorAll('.result-ingredient-row:not(.is-custom-consumed)').forEach(row => {
         bindPressAndHold(row, {
@@ -1238,6 +1260,9 @@ export const UI = {
       }
     }
 
+    // Consolidated Consumption Card ("Ate So Far")
+    UI.renderConsumptionCard();
+
     // Consolidated Daily Summary + Deviation
     const effectiveTotals = r.combinedTotals || r.totals;
     const effectiveDeviations = r.combinedDeviations || r.deviations;
@@ -1255,10 +1280,10 @@ export const UI = {
       const dev = effectiveDeviations[m.key] || { absolute: 0, percentage: 0 };
       const absVal = m.round ? Math.abs(Math.round(dev.absolute)) : Math.abs(dev.absolute).toFixed(1);
       const sign = dev.absolute > 0.001 ? '+' : dev.absolute < -0.001 ? '-' : '';
-      const pctVal = Math.abs(dev.percentage).toFixed(1);
       const isZero = Math.abs(dev.absolute) < (m.round ? 1 : 0.05);
       const cls = isZero ? 'deviation-zero' : 'deviation-error';
-      const devFormatted = isZero ? `0${m.unit} (0.0%)` : `${sign}${absVal}${m.unit} (${sign}${pctVal}%)`;
+      const pctFormatted = isZero ? '0.0%' : formatPercent(dev.percentage, 1, true);
+      const devFormatted = isZero ? `0${m.unit} (0.0%)` : `${sign}${absVal}${m.unit} (${pctFormatted})`;
 
       return `
         <div class="consolidated-row">
@@ -1403,6 +1428,185 @@ export const UI = {
     }
   },
 
+  renderConsumptionCard() {
+    const container = document.getElementById('consumption-container');
+    if (!container) return;
+
+    const r = state.result;
+    if (!r || !r.mealResults || r.mealResults.length === 0) {
+      container.classList.add('hidden');
+      container.innerHTML = '';
+      return;
+    }
+
+    const aggregated = aggregateIngredients(r, state.customFoods, state.ateSoFar, state.ingredients);
+    if (aggregated.length === 0) {
+      container.classList.add('hidden');
+      container.innerHTML = '';
+      return;
+    }
+
+    const consumption = calculateConsumption(aggregated, state.ateSoFar);
+    const remTotals = consumption.remainingTotals;
+    const eatTotals = consumption.eatenTotals;
+
+    const rowsHTML = consumption.items.map(item => {
+      const isCompleted = item.remainingAmount <= 0.001;
+      const remValFormatted = isCompleted
+        ? `<span class="remaining-zero-badge">0 ${esc(item.unit)}</span>`
+        : `${Math.round(item.remainingAmount * 10) / 10} ${esc(item.unit)}`;
+
+      const customBadge = item.custom ? '<span class="custom-badge">CUSTOM</span>' : '';
+      const unplannedBadge = item.unplanned ? '<span class="unplanned-tag">UNPLANNED</span>' : '';
+
+      return `
+        <tr class="consumption-row ${isCompleted ? 'is-completed' : ''}" data-food-id="${escAttr(item.foodDefinitionId)}">
+          <td class="col-food">
+            <span class="consumption-food-name">
+              ${esc(item.name)}
+              ${customBadge}
+              ${unplannedBadge}
+            </span>
+          </td>
+          <td class="col-planned">
+            ${Math.round(item.plannedAmount * 10) / 10} ${esc(item.unit)}
+          </td>
+          <td class="col-ate">
+            <div class="ate-input-cell">
+              <input type="number" class="ate-so-far-input"
+                     data-food-id="${escAttr(item.foodDefinitionId)}"
+                     value="${item.eatenAmount > 0 ? item.eatenAmount : ''}"
+                     min="0" step="any" placeholder="0" inputmode="decimal"
+                     aria-label="Ate so far for ${escAttr(item.name)}" />
+              <span class="ate-input-unit">${esc(item.unit)}</span>
+            </div>
+          </td>
+          <td class="col-remaining">
+            ${remValFormatted}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="consumption-card">
+        <div class="consumption-header-row">
+          <div class="consumption-title-wrap">
+            <div class="consumption-title">Consolidated Consumption</div>
+            <div class="consumption-sub">Track actual food eaten across all meal allocations</div>
+          </div>
+          <div class="consumption-header-actions">
+            <button type="button" class="btn-clear-ate" id="btn-clear-ate">CLEAR EATEN</button>
+          </div>
+        </div>
+
+        <div class="remaining-hero-banner">
+          <div class="remaining-hero-header">
+            <span class="remaining-hero-title">Remaining Today</span>
+            <span class="remaining-hero-sub">Eaten: ${Math.round(eatTotals.calories)} kcal | ${eatTotals.protein.toFixed(1)}P | ${eatTotals.carbs.toFixed(1)}C | ${eatTotals.fat.toFixed(1)}F</span>
+          </div>
+          <div class="remaining-macro-grid">
+            <div class="remaining-macro-pill">
+              <span class="remaining-macro-label">Calories</span>
+              <span class="remaining-macro-val">${Math.round(remTotals.calories)} <span class="unit">kcal</span></span>
+            </div>
+            <div class="remaining-macro-pill">
+              <span class="remaining-macro-label">Protein</span>
+              <span class="remaining-macro-val">${remTotals.protein.toFixed(1)} <span class="unit">g</span></span>
+            </div>
+            <div class="remaining-macro-pill">
+              <span class="remaining-macro-label">Carbs</span>
+              <span class="remaining-macro-val">${remTotals.carbs.toFixed(1)} <span class="unit">g</span></span>
+            </div>
+            <div class="remaining-macro-pill">
+              <span class="remaining-macro-label">Fat</span>
+              <span class="remaining-macro-val">${remTotals.fat.toFixed(1)} <span class="unit">g</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="consumption-table-wrap">
+          <table class="consumption-table">
+            <thead>
+              <tr>
+                <th>Ingredient</th>
+                <th>Planned</th>
+                <th>Ate So Far</th>
+                <th>Remaining</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHTML}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    container.classList.remove('hidden');
+
+    const clearBtn = container.querySelector('#btn-clear-ate');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        state.ateSoFar = {};
+        Persistence.save();
+        UI.renderConsumptionCard();
+      });
+    }
+
+    container.querySelectorAll('.ate-so-far-input').forEach(input => {
+      input.addEventListener('input', function () {
+        const foodId = this.dataset.foodId;
+        const val = parseFloat(this.value);
+        if (!state.ateSoFar) state.ateSoFar = {};
+        if (isNaN(val) || val <= 0) {
+          delete state.ateSoFar[foodId];
+        } else {
+          state.ateSoFar[foodId] = val;
+        }
+        Persistence.save();
+        UI.updateConsumptionDisplay(container);
+      });
+    });
+  },
+
+  updateConsumptionDisplay(container) {
+    if (!container) container = document.getElementById('consumption-container');
+    if (!container || !state.result) return;
+
+    const aggregated = aggregateIngredients(state.result, state.customFoods, state.ateSoFar, state.ingredients);
+    const consumption = calculateConsumption(aggregated, state.ateSoFar);
+    const remTotals = consumption.remainingTotals;
+    const eatTotals = consumption.eatenTotals;
+
+    const bannerSub = container.querySelector('.remaining-hero-sub');
+    if (bannerSub) {
+      bannerSub.textContent = `Eaten: ${Math.round(eatTotals.calories)} kcal | ${eatTotals.protein.toFixed(1)}P | ${eatTotals.carbs.toFixed(1)}C | ${eatTotals.fat.toFixed(1)}F`;
+    }
+    const pills = container.querySelectorAll('.remaining-macro-val');
+    if (pills && pills.length === 4) {
+      pills[0].innerHTML = `${Math.round(remTotals.calories)} <span class="unit">kcal</span>`;
+      pills[1].innerHTML = `${remTotals.protein.toFixed(1)} <span class="unit">g</span>`;
+      pills[2].innerHTML = `${remTotals.carbs.toFixed(1)} <span class="unit">g</span>`;
+      pills[3].innerHTML = `${remTotals.fat.toFixed(1)} <span class="unit">g</span>`;
+    }
+
+    consumption.items.forEach(item => {
+      const row = container.querySelector(`.consumption-row[data-food-id="${item.foodDefinitionId}"]`);
+      if (row) {
+        const isCompleted = item.remainingAmount <= 0.001;
+        row.classList.toggle('is-completed', isCompleted);
+
+        const remTd = row.querySelector('.col-remaining');
+        if (remTd) {
+          remTd.innerHTML = isCompleted
+            ? `<span class="remaining-zero-badge">0 ${esc(item.unit)}</span>`
+            : `${Math.round(item.remainingAmount * 10) / 10} ${esc(item.unit)}`;
+        }
+      }
+    });
+  },
+
   generateSolverDebugLog(state) {
     const r = state.result;
     if (!r) return 'No solver result available.';
@@ -1438,8 +1642,8 @@ export const UI = {
         const devAbs = dev?.absolute ?? 0;
         const devStr = m === 'calories' ? Math.round(devAbs) : devAbs.toFixed(1);
         const sign = devAbs > 0 ? '+' : '';
-        const pct = dev?.percentage != null ? dev.percentage.toFixed(1) : '0.0';
-        lines.push(`  ${m.toUpperCase()}: ${valStr} / ${tgt}${unit} (Δ: ${sign}${devStr}${unit}, ${pct}%)`);
+        const pctStr = dev?.percentage != null ? formatPercent(dev.percentage, 1, false) : '0.0%';
+        lines.push(`  ${m.toUpperCase()}: ${valStr} / ${tgt}${unit} (Δ: ${sign}${devStr}${unit}, ${pctStr})`);
       });
     }
 
@@ -1598,7 +1802,7 @@ export const UI = {
           : '<span class="dim-dash">—</span>';
 
         const pctDiffDisplay = stat.percentDifference !== null
-          ? `${stat.percentDifference > 0 ? '+' : ''}${stat.percentDifference.toFixed(1)}%`
+          ? formatPercent(stat.percentDifference, 1, true)
           : '<span class="dim-dash">—</span>';
 
         return {
@@ -1657,9 +1861,8 @@ export const UI = {
           const targetVal = Math.round(intakeStats.calories.target).toLocaleString();
           const sign = diff > 0 ? '+' : '';
           const diffClass = Math.abs(diff) <= 15 ? 'target-match' : (diff > 0 ? 'target-over' : 'target-under');
-          const pctSign = intakeStats.calories.percentDifference > 0 ? '+' : '';
           const pctStr = intakeStats.calories.percentDifference !== null
-            ? ` (${pctSign}${intakeStats.calories.percentDifference.toFixed(1)}%)`
+            ? ` (${formatPercent(intakeStats.calories.percentDifference, 1, true)})`
             : '';
           const label = diff === 0
             ? `On Target (${targetVal})`
@@ -1694,12 +1897,12 @@ export const UI = {
             const fatPct = (fatKcal / totalMacroKcal) * 100;
             const proPct = (proteinKcal / totalMacroKcal) * 100;
 
-            carbsPctDisplay = `${carbPct.toFixed(1)}%`;
-            fatPctDisplay = `${fatPct.toFixed(1)}%`;
-            proteinPctDisplay = `${proPct.toFixed(1)}%`;
+            carbsPctDisplay = formatPercent(carbPct, 1, false);
+            fatPctDisplay = formatPercent(fatPct, 1, false);
+            proteinPctDisplay = formatPercent(proPct, 1, false);
 
             macroBarHtml = `
-              <div class="macro-split-bar" role="progressbar" aria-label="Macro distribution" title="Carbs ${carbPct.toFixed(1)}%, Fat ${fatPct.toFixed(1)}%, Protein ${proPct.toFixed(1)}%">
+              <div class="macro-split-bar" role="progressbar" aria-label="Macro distribution" title="Carbs ${formatPercent(carbPct, 1, false)}, Fat ${formatPercent(fatPct, 1, false)}, Protein ${formatPercent(proPct, 1, false)}">
                 <div class="macro-bar-seg seg-carbs" style="width: ${carbPct}%;"></div>
                 <div class="macro-bar-seg seg-fat" style="width: ${fatPct}%;"></div>
                 <div class="macro-bar-seg seg-protein" style="width: ${proPct}%;"></div>
@@ -1979,6 +2182,11 @@ export const UI = {
     if (section) section.classList.remove('visible');
     const uneatenAllBtn = document.getElementById('uneaten-all-btn');
     if (uneatenAllBtn) uneatenAllBtn.disabled = true;
+    const consumptionContainer = document.getElementById('consumption-container');
+    if (consumptionContainer) {
+      consumptionContainer.classList.add('hidden');
+      consumptionContainer.innerHTML = '';
+    }
   },
 
   showErrors(errors) {
@@ -2072,7 +2280,8 @@ export const UI = {
           logLines.push(`    #${i + 1} [${r.type}] ${r.label}`);
           logLines.push(`        Raw ΔJ = +${r.objectiveImprovement.toFixed(6)} | Visual Score: ${Math.round(r.normalizedScore * 100)}% (tanh mapped)`);
           if (typeof r.lowerBound === 'number') {
-            logLines.push(`        LP Bound (J_LP*): ${r.lowerBound.toFixed(6)} | Integrality Gap: ${(r.integralityGapAbs || 0).toFixed(6)} (${((r.integralityGapRel || 0) * 100).toFixed(2)}%)`);
+            const gapPct = formatPercent((r.integralityGapRel || 0) * 100, 2, false);
+            logLines.push(`        LP Bound (J_LP*): ${r.lowerBound.toFixed(6)} | Integrality Gap: ${(r.integralityGapAbs || 0).toFixed(6)} (${gapPct})`);
           }
           logLines.push(`        Macro Deltas: ΔCal=${(r.calorieImprovement || 0).toFixed(1)} kcal, ΔP=${(r.proteinImprovement || 0).toFixed(1)}g, ΔC=${(r.carbImprovement || 0).toFixed(1)}g, ΔF=${(r.fatImprovement || 0).toFixed(1)}g`);
           logLines.push(`        Ingredient Used: ${r.ingredientUsed} | Meals Improved: ${r.mealsImproved}`);

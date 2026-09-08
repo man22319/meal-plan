@@ -28,24 +28,44 @@ function formatQuantity(qty) {
 }
 
 /**
+ * Formats a percentage value to a specified number of decimal places.
+ * Guarantees that any percentage rounding to 0.0% is formatted strictly as "0.0%" (or "0%" / "0.00%"),
+ * never "-0.0%" or "+0.0%".
+ *
+ * @param {number} val - Numerical percentage value (e.g. -0.02, 15.4, 0)
+ * @param {number} [decimals=1] - Number of decimal places (default: 1)
+ * @param {boolean} [signed=false] - Whether to prefix non-zero positive values with '+'
+ * @returns {string} Formatted percentage string (e.g. "0.0%", "-1.5%", "+3.2%")
+ */
+export function formatPercent(val, decimals = 1, signed = false) {
+  if (val === null || val === undefined || isNaN(val)) {
+    return decimals > 0 ? `0.${'0'.repeat(decimals)}%` : '0%';
+  }
+  const fixed = Math.abs(val).toFixed(decimals);
+  if (parseFloat(fixed) === 0) {
+    return `${fixed}%`;
+  }
+  const sign = val > 0 ? (signed ? '+' : '') : '-';
+  return `${sign}${fixed}%`;
+}
+
+/**
  * Formats signed deviation and percentage for calories.
  * e.g. "(-31 kcal, -1.3%)" or "(+15 kcal, +0.6%)" or "(0 kcal, 0.0%)"
  */
-function formatCalorieDeviation(absDev, pctDev) {
+export function formatCalorieDeviation(absDev, pctDev) {
   const roundedAbs = Math.round(absDev);
   let absStr;
-  let pctStr;
 
   if (roundedAbs > 0) {
     absStr = `+${roundedAbs} kcal`;
-    pctStr = `+${pctDev.toFixed(1)}%`;
   } else if (roundedAbs < 0) {
     absStr = `-${Math.abs(roundedAbs)} kcal`;
-    pctStr = `-${Math.abs(pctDev).toFixed(1)}%`;
   } else {
     absStr = '0 kcal';
-    pctStr = '0.0%';
   }
+
+  const pctStr = formatPercent(pctDev, 1, true);
   return `(${absStr}, ${pctStr})`;
 }
 
@@ -53,21 +73,19 @@ function formatCalorieDeviation(absDev, pctDev) {
  * Formats signed deviation and percentage for macronutrients (P, C, F).
  * e.g. "(-3.9 g, -6.2%)" or "(+2.0 g, +1.3%)" or "(0.0 g, 0.0%)"
  */
-function formatMacroDeviation(absDev, pctDev) {
+export function formatMacroDeviation(absDev, pctDev) {
   const roundedAbs = Math.round(absDev * 10) / 10;
   let absStr;
-  let pctStr;
 
   if (roundedAbs > 0.001) {
     absStr = `+${roundedAbs.toFixed(1)} g`;
-    pctStr = `+${pctDev.toFixed(1)}%`;
   } else if (roundedAbs < -0.001) {
     absStr = `-${Math.abs(roundedAbs).toFixed(1)} g`;
-    pctStr = `-${Math.abs(pctDev).toFixed(1)}%`;
   } else {
     absStr = '0.0 g';
-    pctStr = '0.0%';
   }
+
+  const pctStr = formatPercent(pctDev, 1, true);
   return `(${absStr}, ${pctStr})`;
 }
 

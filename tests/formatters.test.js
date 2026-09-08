@@ -2,7 +2,12 @@
 // FORMATTERS UNIT TESTS — Pure Daily Summary Tests
 // ══════════════════════════════════════════
 
-import { formatDailySummary } from '../src/core/formatters.js';
+import {
+  formatDailySummary,
+  formatPercent,
+  formatCalorieDeviation,
+  formatMacroDeviation
+} from '../src/core/formatters.js';
 
 let failed = 0;
 function assert(name, condition, details = '') {
@@ -276,6 +281,45 @@ console.log('══════════════════════�
   const emptyText = formatDailySummary(emptyMealResult, { calories: 2000, protein: 150, carbs: 200, fat: 50 });
   assert('Test F: Empty meal results render meal headers without throwing',
     emptyText.includes('BREAKFAST') && emptyText.includes('LUNCH'));
+}
+
+// ── TEST G: Zero and Sub-Threshold Percentage Formatting (No -0.0%) ──
+{
+  // formatPercent edge cases
+  assert('Test G: formatPercent(0) is "0.0%"', formatPercent(0) === '0.0%');
+  assert('Test G: formatPercent(-0) is "0.0%"', formatPercent(-0) === '0.0%');
+  assert('Test G: formatPercent(-0.04) rounds to "0.0%" (no negative)', formatPercent(-0.04) === '0.0%');
+  assert('Test G: formatPercent(0.04) rounds to "0.0%"', formatPercent(0.04) === '0.0%');
+  assert('Test G: formatPercent(-0.0001) is "0.0%"', formatPercent(-0.0001) === '0.0%');
+  assert('Test G: formatPercent(-0.04, 1, true) is "0.0%" (no sign prefix on zero)', formatPercent(-0.04, 1, true) === '0.0%');
+  assert('Test G: formatPercent(0.04, 1, true) is "0.0%" (no + prefix on zero)', formatPercent(0.04, 1, true) === '0.0%');
+  assert('Test G: formatPercent(-1.5, 1, true) is "-1.5%"', formatPercent(-1.5, 1, true) === '-1.5%');
+  assert('Test G: formatPercent(1.5, 1, true) is "+1.5%"', formatPercent(1.5, 1, true) === '+1.5%');
+  assert('Test G: formatPercent(-1.5, 1, false) is "-1.5%"', formatPercent(-1.5, 1, false) === '-1.5%');
+  assert('Test G: formatPercent(1.5, 1, false) is "1.5%"', formatPercent(1.5, 1, false) === '1.5%');
+  assert('Test G: formatPercent(-0.004, 2) is "0.00%"', formatPercent(-0.004, 2) === '0.00%');
+
+  // formatCalorieDeviation sub-threshold edge cases
+  assert('Test G: Calorie deviation with negative fraction does not show -0.0%',
+    formatCalorieDeviation(-1, -0.033) === '(-1 kcal, 0.0%)');
+  assert('Test G: Calorie deviation with positive fraction does not show +0.0%',
+    formatCalorieDeviation(1, 0.033) === '(+1 kcal, 0.0%)');
+
+  // formatMacroDeviation sub-threshold edge cases
+  assert('Test G: Macro deviation with negative fraction does not show -0.0%',
+    formatMacroDeviation(-0.1, -0.04) === '(-0.1 g, 0.0%)');
+  assert('Test G: Macro deviation with positive fraction does not show +0.0%',
+    formatMacroDeviation(0.1, 0.04) === '(+0.1 g, 0.0%)');
+
+  // formatDailySummary end-to-end with near-zero percentage
+  const nearZeroResult = {
+    totals: { calories: 2499, protein: 149.9, carbs: 200, fat: 50 },
+    mealResults: []
+  };
+  const summaryText = formatDailySummary(nearZeroResult, { calories: 2500, protein: 150, carbs: 200, fat: 50 });
+  assert('Test G: Daily summary does not contain -0.0%', !summaryText.includes('-0.0%'), `Got:\n${summaryText}`);
+  assert('Test G: Daily summary formats near-zero calorie deviation as (0.0%)',
+    summaryText.includes('Calories: 2499 / 2500 kcal (-1 kcal, 0.0%)'), `Got:\n${summaryText}`);
 }
 
 console.log('\n═══════════════════════════════════════════════════════════════════');

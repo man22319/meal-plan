@@ -7,10 +7,39 @@
 // deviation linearization with d+/d- auxiliary variables,
 // and immutable actual portion observation locking.
 
-import { state, ensureId } from './state.js';
+import { state, ensureId, generateId, copyMeal } from './state.js';
 import { Validation } from './validation.js';
 import { PRECISION } from './precision.js';
 import { getRemainingTargets, getRemainingMealTarget, aggregateCustomFoods } from './customFoods.js';
+
+export function calculateMacroCalories(pOrObj, carbs, fat) {
+  if (typeof pOrObj === 'object' && pOrObj !== null) {
+    const p = Number(pOrObj.protein) || 0;
+    const c = Number(pOrObj.carbs) || 0;
+    const f = Number(pOrObj.fat) || 0;
+    return 4 * p + 4 * c + 9 * f;
+  }
+  const p = Number(pOrObj) || 0;
+  const c = Number(carbs) || 0;
+  const f = Number(fat) || 0;
+  return 4 * p + 4 * c + 9 * f;
+}
+
+export function calculateMacroCalorieDelta(dPOrObj, dCarbs, dFat) {
+  if (typeof dPOrObj === 'object' && dPOrObj !== null) {
+    const dp = Number(dPOrObj.protein ?? dPOrObj.dP) || 0;
+    const dc = Number(dPOrObj.carbs ?? dPOrObj.dC) || 0;
+    const df = Number(dPOrObj.fat ?? dPOrObj.dF) || 0;
+    return 4 * dp + 4 * dc + 9 * df;
+  }
+  const dp = Number(dPOrObj) || 0;
+  const dc = Number(dCarbs) || 0;
+  const df = Number(dFat) || 0;
+  return 4 * dp + 4 * dc + 9 * df;
+}
+
+export const calcMacroCalories = calculateMacroCalories;
+export const calcMacroCalorieDelta = calculateMacroCalorieDelta;
 
 export function resolveMealAndIngIds(mealRef, ingRef) {
   let mealId = (mealRef && typeof mealRef === 'object') ? mealRef.id : mealRef;
@@ -150,6 +179,8 @@ export function extractResults(raw, customState = state) {
 
           items.push({
             id: ing.id,
+            foodDefinitionId: ing.foodDefinitionId || ing.id,
+            mealItemId: generateId('item'),
             mealId: meal.id || `meal_${j}`,
             mealIdx: j,
             name: ing.name,
@@ -166,6 +197,11 @@ export function extractResults(raw, customState = state) {
             protein: itemPro,
             carbs: itemCarb,
             fat: itemFat,
+            caloriesPerServing: ing.calories,
+            proteinPerServing: ing.protein,
+            carbsPerServing: ing.carbs,
+            fatPerServing: ing.fat,
+            custom: Boolean(ing.custom),
             selected: servings > PRECISION.SERVING_MIN_EPS || z > 0.5,
             quantityMode: ing.quantityMode || 'continuous',
             availability: ing.availability || 'normal'
@@ -190,6 +226,8 @@ export function extractResults(raw, customState = state) {
 
           items.push({
             id: ing.id,
+            foodDefinitionId: ing.foodDefinitionId || ing.id,
+            mealItemId: generateId('item'),
             mealId: meal.id || `meal_${j}`,
             mealIdx: j,
             name: ing.name,
@@ -206,6 +244,11 @@ export function extractResults(raw, customState = state) {
             protein: itemPro,
             carbs: itemCarb,
             fat: itemFat,
+            caloriesPerServing: ing.calories,
+            proteinPerServing: ing.protein,
+            carbsPerServing: ing.carbs,
+            fatPerServing: ing.fat,
+            custom: Boolean(ing.custom),
             selected: z > 0.5,
             quantityMode: ing.quantityMode || 'continuous',
             availability: ing.availability || 'normal'
@@ -384,6 +427,27 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
     model.variables[`dM_${m}`] = { cost: coeff, [c]: 1 };
   });
 
+  // 1b. Macro-calorie soft reconciliation constraints:
+  //     -e_macroKcal <= sum_i d_i x_i <= e_macroKcal
+  //     where d_i = calories_i - (4 * protein_i + 4 * carbs_i + 9 * fat_i).
+  //     Represented as two standard upper-bound constraints:
+  //       sum_i d_i x_i - e_macroKcal <= 0  (macro_reconcile_pos)
+  //      -sum_i d_i x_i - e_macroKcal <= 0  (macro_reconcile_neg)
+  const macroReconcileWeight = (weights && typeof weights.macroReconciliation === 'number')
+    ? weights.macroReconciliation
+    : 0.5;
+  const reconcileCoeff = targets.calories > 0
+    ? (macroReconcileWeight / targets.calories)
+    : 0.0005;
+
+  model.constraints['macro_reconcile_pos'] = { max: 0 };
+  model.constraints['macro_reconcile_neg'] = { max: 0 };
+  model.variables['e_macroKcal'] = {
+    cost: reconcileCoeff,
+    macro_reconcile_pos: -1,
+    macro_reconcile_neg: -1
+  };
+
   // 2. Meal calorie allocation constraints (soft target per meal)
   //    Subtract custom foods assigned to each meal from that meal's allocation.
   meals.forEach((meal, j) => {
@@ -431,6 +495,7 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
     const minS = typeof ing.minServings === 'number' && ing.minServings > 0 ? ing.minServings : 0;
     const prefS = typeof ing.preferredServings === 'number' && ing.preferredServings > 0 ? ing.preferredServings : 1.0;
     const hasDailyCap = ing.availability in AVAILABILITY_CAPS;
+    const dMacro = ing.calories - (4 * ing.protein + 4 * ing.carbs + 9 * ing.fat);
 
     meals.forEach((meal, j) => {
       const v_x = `x_${i}_${j}`;
@@ -455,6 +520,8 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
           xEntry[`daily_${m}`] = ing[m];
         });
         xEntry[`meal_${j}`] = ing.calories;
+        xEntry['macro_reconcile_pos'] = dMacro;
+        xEntry['macro_reconcile_neg'] = -dMacro;
 
         // Note: Recorded consumption does NOT consume remaining inventory cap
         // (daily_cap_i is reserved for unrecorded allocation going forward)
@@ -508,6 +575,8 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
           xEntry[`daily_${m}`] = ing[m];
         });
         xEntry[`meal_${j}`] = ing.calories;
+        xEntry['macro_reconcile_pos'] = dMacro;
+        xEntry['macro_reconcile_neg'] = -dMacro;
 
         if (hasDailyCap) {
           xEntry[`daily_cap_${i}`] = 1;
@@ -726,6 +795,10 @@ export const Optimization = {
       });
     }
     return { result: state.result };
+  },
+
+  copyMeal(sourceMealId, customState = state) {
+    return copyMeal(sourceMealId, customState);
   },
 
   _extract(raw) {

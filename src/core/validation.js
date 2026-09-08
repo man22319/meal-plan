@@ -4,6 +4,7 @@
 
 import { AVAILABILITY_STATES, state } from './state.js';
 import { PRECISION } from './precision.js';
+import { formatPercent } from './formatters.js';
 
 export const Validation = {
   validateAll(customState = state) {
@@ -51,7 +52,7 @@ export const Validation = {
       }
     });
     if (Math.abs(totalPct - 100) > PRECISION.MEAL_PCT_SUM_TOLERANCE) {
-      errors.push(`Meal percentages total ${totalPct.toFixed(1)}%. Must equal 100%.`);
+      errors.push(`Meal percentages total ${formatPercent(totalPct, 1, false)}. Must equal 100%.`);
     }
     return errors;
   },
