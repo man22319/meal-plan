@@ -2,6 +2,14 @@
 // FORMATTERS — Plain-text Result Presentation
 // ══════════════════════════════════════════
 
+import {
+  calculateCurrentWeight,
+  calculateMovingAverage,
+  calculateWeightTrend,
+  calculateIntakeStats,
+  getLocalDateString
+} from './stats.js';
+
 /**
  * Formats macro values on ingredient line items (e.g. 31, 4.5, 0, 3.6, 63).
  * If close to integer, outputs integer; otherwise 1 decimal place.
@@ -94,9 +102,10 @@ export function formatMacroDeviation(absDev, pctDev) {
  * 
  * @param {Object} result - Solver result containing totals, mealResults, and optional deviations
  * @param {Object} [targets] - Target calories and macros (calories, protein, carbs, fat)
+ * @param {Array} [customFoods] - Optional custom food entries to include in meal listings
  * @returns {string} Plain-text formatted daily summary
  */
-export function formatDailySummary(result, targets = null) {
+export function formatDailySummary(result, targets = null, customFoods = []) {
   if (!result || typeof result !== 'object') {
     return '';
   }
@@ -167,6 +176,7 @@ export function formatDailySummary(result, targets = null) {
   lines.push(`Fat: ${(effectiveTotals.fat || 0).toFixed(1)} / ${fatTarget} g ${formatMacroDeviation(fatDev.absolute, fatDev.percentage)}`);
 
   const mealResults = Array.isArray(result.mealResults) ? result.mealResults : [];
+  const cfFoods = Array.isArray(customFoods) ? customFoods : [];
 
   mealResults.forEach(meal => {
     lines.push('');
@@ -191,7 +201,169 @@ export function formatDailySummary(result, targets = null) {
 
       lines.push(`${item.name} — ${servingsFormatted} ${servingWord} (${qtyStr} ${unit}) — ${cal} kcal — ${p}P / ${c}C / ${f}F`);
     });
+
+    // Include custom foods assigned to this meal
+    const mealCustom = cfFoods.filter(cf => {
+      const cfMeal = cf.meal;
+      return cfMeal === meal.id || cfMeal === meal.name;
+    });
+    mealCustom.forEach(cf => {
+      const cal = typeof cf.calories === 'number' ? Math.round(cf.calories) : '—';
+      const p = typeof cf.protein === 'number' ? formatItemMacro(cf.protein) : '—';
+      const c = typeof cf.carbs === 'number' ? formatItemMacro(cf.carbs) : '—';
+      const f = typeof cf.fat === 'number' ? formatItemMacro(cf.fat) : '—';
+      const amt = typeof cf.amount === 'number' ? formatQuantity(cf.amount) : '1';
+      const unit = cf.unit || 'serving';
+      lines.push(`Custom · ${cf.name} — ${amt} ${unit} — ${cal} kcal — ${p}P / ${c}C / ${f}F`);
+    });
   });
+
+  // Include unassigned custom foods (not linked to any meal)
+  const unassigned = cfFoods.filter(cf => {
+    if (!cf.meal) return true;
+    return !mealResults.some(m => m.id === cf.meal || m.name === cf.meal);
+  });
+  if (unassigned.length > 0) {
+    lines.push('');
+    lines.push('CUSTOM FOODS (UNASSIGNED)');
+    unassigned.forEach(cf => {
+      const cal = typeof cf.calories === 'number' ? Math.round(cf.calories) : '—';
+      const p = typeof cf.protein === 'number' ? formatItemMacro(cf.protein) : '—';
+      const c = typeof cf.carbs === 'number' ? formatItemMacro(cf.carbs) : '—';
+      const f = typeof cf.fat === 'number' ? formatItemMacro(cf.fat) : '—';
+      const amt = typeof cf.amount === 'number' ? formatQuantity(cf.amount) : '1';
+      const unit = cf.unit || 'serving';
+      lines.push(`Custom · ${cf.name} — ${amt} ${unit} — ${cal} kcal — ${p}P / ${c}C / ${f}F`);
+    });
+  }
 
   return lines.join('\n');
 }
+
+/**
+ * Formats a plain-text summary of the weight trend and nutritional trend for clipboard export.
+ *
+ * @param {Object} [options={}]
+ * @param {Object} [options.weightHistory] - Weight entries keyed by YYYY-MM-DD
+ * @param {Object} [options.intakeHistory] - Intake entries keyed by YYYY-MM-DD
+ * @param {Object} [options.targets] - Daily nutrient targets (calories, protein, carbs, fat)
+ * @param {number} [options.windowDays=7] - Nutrition timeframe window in days (e.g. 7, 14, 30)
+ * @param {string} [options.referenceDate] - YYYY-MM-DD reference date (defaults to today)
+ * @returns {string} Formatted plain-text summary
+ */
+export function formatWeightAndNutritionSummary({
+  weightHistory = {},
+  intakeHistory = {},
+  targets = null,
+  windowDays = 7,
+  referenceDate = null
+} = {}) {
+  const refDate = referenceDate || getLocalDateString();
+  const days = typeof windowDays === 'number' && windowDays > 0 ? windowDays : 7;
+
+  // Weight metrics
+  const curW = calculateCurrentWeight(weightHistory, refDate);
+  const avg7 = calculateMovingAverage(weightHistory, 7, refDate);
+  const avg14 = calculateMovingAverage(weightHistory, 14, refDate);
+  const trendRate = calculateWeightTrend(weightHistory, { windowDays: 14, minObservations: 3, referenceDate: refDate });
+
+  const curDisplay = curW !== null ? `${curW.toFixed(1)} lb` : '—';
+  const avg7Display = avg7 !== null ? `${avg7.toFixed(1)} lb` : '—';
+  const avg14Display = avg14 !== null ? `${avg14.toFixed(1)} lb` : '—';
+  let rateDisplay = '—';
+  if (trendRate !== null) {
+    const sign = trendRate > 0.001 ? '+' : '';
+    rateDisplay = `${sign}${trendRate.toFixed(2)} lb/wk`;
+  }
+
+  // Intake metrics
+  const intakeStats = calculateIntakeStats(intakeHistory, days, refDate, targets);
+
+  const lines = [
+    'WEIGHT & NUTRITIONAL TREND SUMMARY',
+    `Date: ${refDate}`,
+    '',
+    'WEIGHT TREND',
+    `Current: ${curDisplay}`,
+    `7-Day Avg: ${avg7Display}`,
+    `14-Day Avg: ${avg14Display}`,
+    `Rate: ${rateDisplay}`,
+    '',
+    `NUTRITIONAL TREND (${days}-DAY WINDOW)`
+  ];
+
+  if (!intakeStats || intakeStats.distinctDays === 0) {
+    lines.push(`Logged: 0 / ${days} days`);
+    lines.push('No intake snapshots recorded in this period.');
+  } else {
+    lines.push(`Logged: ${intakeStats.distinctDays} / ${days} days`);
+
+    // Calories
+    const cal = intakeStats.calories;
+    if (cal && cal.mean !== null) {
+      let calLine = `Calories: ${Math.round(cal.mean).toLocaleString()} kcal/day`;
+      if (cal.sd !== null) {
+        calLine += ` (±${Math.round(cal.sd).toLocaleString()})`;
+      }
+      if (cal.target !== null) {
+        calLine += ` | Target: ${Math.round(cal.target).toLocaleString()} kcal ${formatCalorieDeviation(cal.difference, cal.percentDifference)}`;
+      }
+      if (cal.min !== null && cal.max !== null) {
+        calLine += ` | Range: ${Math.round(cal.min).toLocaleString()}–${Math.round(cal.max).toLocaleString()}`;
+      }
+      if (cal.median !== null) {
+        calLine += ` | Med: ${Math.round(cal.median).toLocaleString()}`;
+      }
+      lines.push(calLine);
+    } else {
+      lines.push('Calories: —');
+    }
+
+    // Macros helper
+    const formatMacroLine = (name, stat) => {
+      if (stat && stat.mean !== null) {
+        let mLine = `${name}: ${stat.mean.toFixed(1)} g/day`;
+        if (stat.sd !== null) {
+          mLine += ` (±${stat.sd.toFixed(1)})`;
+        }
+        if (stat.target !== null) {
+          mLine += ` | Target: ${stat.target.toFixed(1)} g ${formatMacroDeviation(stat.difference, stat.percentDifference)}`;
+        }
+        if (stat.min !== null && stat.max !== null) {
+          mLine += ` | Range: ${stat.min.toFixed(1)}–${stat.max.toFixed(1)}`;
+        }
+        if (stat.median !== null) {
+          mLine += ` | Med: ${stat.median.toFixed(1)}`;
+        }
+        return mLine;
+      }
+      return `${name}: —`;
+    };
+
+    lines.push(formatMacroLine('Carbs', intakeStats.carbs));
+    lines.push(formatMacroLine('Fat', intakeStats.fat));
+    lines.push(formatMacroLine('Protein', intakeStats.protein));
+
+    // Macro Split
+    const avgCarbs = intakeStats.carbs?.mean;
+    const avgFat = intakeStats.fat?.mean;
+    const avgProtein = intakeStats.protein?.mean;
+    if (avgCarbs !== null && avgCarbs !== undefined &&
+        avgFat !== null && avgFat !== undefined &&
+        avgProtein !== null && avgProtein !== undefined) {
+      const carbKcal = avgCarbs * 4;
+      const fatKcal = avgFat * 9;
+      const proKcal = avgProtein * 4;
+      const totalMacroKcal = carbKcal + fatKcal + proKcal;
+      if (totalMacroKcal > 0) {
+        const carbPct = formatPercent((carbKcal / totalMacroKcal) * 100, 1, false);
+        const fatPct = formatPercent((fatKcal / totalMacroKcal) * 100, 1, false);
+        const proPct = formatPercent((proKcal / totalMacroKcal) * 100, 1, false);
+        lines.push(`Macro Split: ${carbPct} C / ${fatPct} F / ${proPct} P`);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+

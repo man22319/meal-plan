@@ -50,6 +50,10 @@ export function escAttr(str) {
 }
 
 export const UI = {
+  getActiveNutritionWindowDays() {
+    return activeNutritionWindowDays;
+  },
+
   // ── TARGETS ──
   renderTargets() {
     const container = document.getElementById('target-fields');
@@ -1003,16 +1007,32 @@ export const UI = {
 
         const itemsHTML = meal.items.length > 0
           ? meal.items.map(item => {
-              const isEaten = Boolean(item.isEaten);
+              const plannedQty = item.plannedQuantity ?? item.quantity ?? 0;
+              const eatenQty = typeof item.eatenQuantity === 'number'
+                ? item.eatenQuantity
+                : (item.isEaten ? plannedQty : 0);
+              const isEaten = Boolean(item.isEaten || (eatenQty >= plannedQty && plannedQty > 0));
+              const isPartiallyEaten = eatenQty > 0 && !isEaten;
+              const remainingQty = Math.max(0, plannedQty - eatenQty);
               const isActual = Boolean(item.isActual);
               const qty = isActual ? item.actualQuantity : item.quantity;
               const badges = [
                 isEaten ? '<span class="eaten-badge">EATEN</span>' : '',
+                isPartiallyEaten ? '<span class="partial-badge">PARTIAL</span>' : '',
                 isActual && !isEaten ? '<span class="actual-badge">ACTUAL</span>' : ''
               ].join('');
 
+              let qtyDisplay = `${Math.round(qty)} ${esc(item.unit)}`;
+              let subDisplay = '';
+              if (isPartiallyEaten) {
+                qtyDisplay = `${Math.round(remainingQty)} ${esc(item.unit)}`;
+                subDisplay = `<span class="result-planned-sub">${Math.round(eatenQty)} / ${Math.round(plannedQty)} ${esc(item.unit)} eaten</span>`;
+              } else if (isActual) {
+                subDisplay = `<span class="result-planned-sub">planned ${Math.round(item.plannedQuantity)} ${esc(item.unit)}</span>`;
+              }
+
               return `
-                <div class="result-ingredient-row ${isActual ? 'is-actual' : ''} ${isEaten ? 'is-eaten' : ''}"
+                <div class="result-ingredient-row ${isActual ? 'is-actual' : ''} ${isEaten ? 'is-eaten' : ''} ${isPartiallyEaten ? 'is-partial' : ''}"
                      role="button"
                      tabindex="0"
                      data-meal-id="${escAttr(item.mealId || meal.id || mealIdx)}"
@@ -1020,11 +1040,14 @@ export const UI = {
                      data-meal-name="${escAttr(meal.name)}"
                      data-ing-name="${escAttr(item.name)}"
                      data-unit="${escAttr(item.unit)}"
-                     data-planned="${item.plannedQuantity}"
+                     data-planned="${plannedQty}"
+                     data-eaten="${eatenQty}"
+                     data-remaining="${remainingQty}"
                      data-actual="${isActual ? item.actualQuantity : ''}"
                      data-is-actual="${isActual ? 'true' : 'false'}"
                      data-is-eaten="${isEaten ? 'true' : 'false'}"
-                     aria-label="${isEaten ? 'Eaten' : 'Hold to mark eaten'}: ${escAttr(item.name)} in ${escAttr(meal.name)}">
+                     data-is-partial="${isPartiallyEaten ? 'true' : 'false'}"
+                     aria-label="${isEaten ? 'Eaten' : (isPartiallyEaten ? 'Partially eaten: ' + Math.round(eatenQty) + '/' + Math.round(plannedQty) : 'Hold to mark eaten')}: ${escAttr(item.name)} in ${escAttr(meal.name)}">
                   <div class="hold-progress" aria-hidden="true">
                     <svg class="hold-progress-svg" preserveAspectRatio="none">
                       <path class="hold-progress-track" fill="none" vector-effect="non-scaling-stroke" />
@@ -1033,11 +1056,11 @@ export const UI = {
                   </div>
                   <div class="result-ingredient-left">
                     <span class="result-ingredient-name">${esc(item.name)}</span>
-                    ${isActual ? `<span class="result-planned-sub">planned ${Math.round(item.plannedQuantity)} ${esc(item.unit)}</span>` : ''}
+                    ${subDisplay}
                   </div>
                   <div class="result-ingredient-right">
                     <div class="result-qty-line">
-                      <span class="result-ingredient-qty">${Math.round(qty)} ${esc(item.unit)}</span>
+                      <span class="result-ingredient-qty">${qtyDisplay}</span>
                       ${badges}
                     </div>
                     <span class="result-servings">(${item.servings.toFixed(2)} serv)</span>
@@ -1439,7 +1462,7 @@ export const UI = {
       return;
     }
 
-    const aggregated = aggregateIngredients(r, state.customFoods, state.ateSoFar, state.ingredients);
+    const aggregated = aggregateIngredients(r, state.customFoods, state.eatenItems, state.ingredients);
     if (aggregated.length === 0) {
       container.classList.add('hidden');
       container.innerHTML = '';
@@ -1476,10 +1499,11 @@ export const UI = {
             <div class="ate-input-cell">
               <input type="number" class="ate-so-far-input"
                      data-food-id="${escAttr(item.foodDefinitionId)}"
-                     value="${item.eatenAmount > 0 ? item.eatenAmount : ''}"
+                     value="${item.eatenAmount > 0 ? (Math.round(item.eatenAmount * 10) / 10) : ''}"
                      min="0" step="any" placeholder="0" inputmode="decimal"
                      aria-label="Ate so far for ${escAttr(item.name)}" />
               <span class="ate-input-unit">${esc(item.unit)}</span>
+              <button type="button" class="btn-apply-eaten" data-food-id="${escAttr(item.foodDefinitionId)}" title="Apply to meal ingredients">Apply</button>
             </div>
           </td>
           <td class="col-remaining">
@@ -1495,9 +1519,6 @@ export const UI = {
           <div class="consumption-title-wrap">
             <div class="consumption-title">Consolidated Consumption</div>
             <div class="consumption-sub">Track actual food eaten across all meal allocations</div>
-          </div>
-          <div class="consumption-header-actions">
-            <button type="button" class="btn-clear-ate" id="btn-clear-ate">CLEAR EATEN</button>
           </div>
         </div>
 
@@ -1546,16 +1567,36 @@ export const UI = {
 
     container.classList.remove('hidden');
 
-    const clearBtn = container.querySelector('#btn-clear-ate');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        state.ateSoFar = {};
+    container.querySelectorAll('.btn-apply-eaten').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const foodId = this.dataset.foodId;
+        const row = container.querySelector(`.consumption-row[data-food-id="${foodId}"]`);
+        const input = row?.querySelector('.ate-so-far-input');
+        if (!input) return;
+        const val = parseFloat(input.value);
+        const totalEaten = (!isNaN(val) && val > 0) ? val : 0;
+        Optimization.applyConsolidatedToIngredients(foodId, totalEaten);
+        if (!state.ateSoFar) state.ateSoFar = {};
+        if (totalEaten > 0) {
+          state.ateSoFar[foodId] = totalEaten;
+        } else {
+          delete state.ateSoFar[foodId];
+        }
         Persistence.save();
-        UI.renderConsumptionCard();
+        UI.renderResults({ scroll: false });
       });
-    }
+    });
 
     container.querySelectorAll('.ate-so-far-input').forEach(input => {
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const foodId = this.dataset.foodId;
+          const row = container.querySelector(`.consumption-row[data-food-id="${foodId}"]`);
+          const applyBtn = row?.querySelector('.btn-apply-eaten');
+          applyBtn?.click();
+        }
+      });
       input.addEventListener('input', function () {
         const foodId = this.dataset.foodId;
         const val = parseFloat(this.value);
@@ -1575,7 +1616,7 @@ export const UI = {
     if (!container) container = document.getElementById('consumption-container');
     if (!container || !state.result) return;
 
-    const aggregated = aggregateIngredients(state.result, state.customFoods, state.ateSoFar, state.ingredients);
+    const aggregated = aggregateIngredients(state.result, state.customFoods, state.eatenItems, state.ingredients);
     const consumption = calculateConsumption(aggregated, state.ateSoFar);
     const remTotals = consumption.remainingTotals;
     const eatTotals = consumption.eatenTotals;

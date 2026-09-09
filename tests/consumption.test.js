@@ -3,12 +3,17 @@
 // ══════════════════════════════════════════
 
 import assert from 'node:assert';
-import { state, copyMeal } from '../src/core/state.js';
+import { state, copyMeal, DEFAULT_TARGETS } from '../src/core/state.js';
 import {
   aggregateIngredients,
   calculateConsumption,
-  duplicateMealItem
+  duplicateMealItem,
+  distributeConsolidatedEaten,
+  getConsolidatedEaten,
+  getItemEatenQuantity
 } from '../src/core/consumption.js';
+import { Optimization } from '../src/core/solver.js';
+import { formatDailySummary } from '../src/core/formatters.js';
 import { Persistence } from '../src/io/persistence.js';
 import { UI } from '../src/ui/render.js';
 
@@ -564,6 +569,200 @@ export function runConsumptionTestSuite() {
 
     global.document.getElementById = origGetById;
     console.log('[CS-10] Consolidated Consumption Whole Number Rounding: PASSED');
+  }
+
+  // ── TEST 11: Deterministic Meal-Order Distribution Across Items ──
+  {
+    resetTestState();
+    const mealResults = [
+      {
+        id: 'meal_breakfast',
+        name: 'Breakfast',
+        items: [
+          { id: 'ing_chicken', foodDefinitionId: 'ing_chicken', mealId: 'meal_breakfast', name: 'Chicken', plannedQuantity: 100, quantity: 100 }
+        ]
+      },
+      {
+        id: 'meal_lunch',
+        name: 'Lunch',
+        items: [
+          { id: 'ing_chicken', foodDefinitionId: 'ing_chicken', mealId: 'meal_lunch', name: 'Chicken', plannedQuantity: 150, quantity: 150 }
+        ]
+      },
+      {
+        id: 'meal_dinner',
+        name: 'Dinner',
+        items: [
+          { id: 'ing_chicken', foodDefinitionId: 'ing_chicken', mealId: 'meal_dinner', name: 'Chicken', plannedQuantity: 100, quantity: 100 }
+        ]
+      }
+    ];
+
+    const eatenItems = {};
+    // Distribute 180g of chicken across 100g Breakfast, 150g Lunch, 100g Dinner:
+    // Breakfast gets 100g (full -> isEaten: true)
+    // Lunch gets 80g (partial -> isEaten: false)
+    // Dinner gets 0g (uneaten -> isEaten: false)
+    distributeConsolidatedEaten('ing_chicken', 180, mealResults, eatenItems);
+
+    assert.strictEqual(eatenItems['meal_breakfast_ing_chicken']?.eatenQuantity, 100);
+    assert.strictEqual(mealResults[0].items[0].isEaten, true);
+    assert.strictEqual(mealResults[0].items[0].eatenQuantity, 100);
+
+    assert.strictEqual(eatenItems['meal_lunch_ing_chicken']?.eatenQuantity, 80);
+    assert.strictEqual(mealResults[1].items[0].isEaten, false);
+    assert.strictEqual(mealResults[1].items[0].eatenQuantity, 80);
+
+    assert.strictEqual(eatenItems['meal_dinner_ing_chicken'], undefined);
+    assert.strictEqual(mealResults[2].items[0].isEaten, false);
+    assert.strictEqual(mealResults[2].items[0].eatenQuantity, 0);
+
+    console.log('[CS-11] Deterministic Meal-Order Distribution Invariants: PASSED');
+  }
+
+  // ── TEST 12: Consolidated Eaten Derivation from Item Source of Truth ──
+  {
+    resetTestState();
+    const mealResults = [
+      {
+        id: 'meal_1',
+        items: [{ id: 'ing_chicken', foodDefinitionId: 'ing_chicken', mealId: 'meal_1', plannedQuantity: 100 }]
+      },
+      {
+        id: 'meal_2',
+        items: [{ id: 'ing_chicken', foodDefinitionId: 'ing_chicken', mealId: 'meal_2', plannedQuantity: 150 }]
+      }
+    ];
+    const eatenItems = {
+      'meal_1_ing_chicken': { eatenQuantity: 100, plannedQuantity: 100 },
+      'meal_2_ing_chicken': { eatenQuantity: 50, plannedQuantity: 150 }
+    };
+
+    const totalEaten = getConsolidatedEaten('ing_chicken', eatenItems, mealResults);
+    assert.strictEqual(totalEaten, 150, 'Consolidated total must be exactly 100 + 50 = 150');
+
+    console.log('[CS-12] Consolidated Eaten Derivation: PASSED');
+  }
+
+  // ── TEST 13: Apply Consolidated to Ingredients via Solver Method ──
+  {
+    resetTestState();
+    state.result = {
+      mealResults: [
+        {
+          id: 'meal_b',
+          name: 'Breakfast',
+          items: [{ id: 'ing_rice', foodDefinitionId: 'ing_rice', mealId: 'meal_b', name: 'Rice', plannedQuantity: 120, quantity: 120, servings: 1.2 }]
+        },
+        {
+          id: 'meal_d',
+          name: 'Dinner',
+          items: [{ id: 'ing_rice', foodDefinitionId: 'ing_rice', mealId: 'meal_d', name: 'Rice', plannedQuantity: 80, quantity: 80, servings: 0.8 }]
+        }
+      ]
+    };
+    state.eatenItems = {};
+
+    Optimization.applyConsolidatedToIngredients('ing_rice', 150);
+
+    // Breakfast Rice: planned 120, allocated 120 -> isEaten = true
+    const bRice = state.result.mealResults[0].items[0];
+    assert.strictEqual(bRice.isEaten, true);
+    assert.strictEqual(bRice.eatenQuantity, 120);
+
+    // Dinner Rice: planned 80, allocated 30 -> isEaten = false
+    const dRice = state.result.mealResults[1].items[0];
+    assert.strictEqual(dRice.isEaten, false);
+    assert.strictEqual(dRice.eatenQuantity, 30);
+
+    // Consolidated aggregation reflects the 150g eaten
+    const agg = aggregateIngredients(state.result, [], state.eatenItems, []);
+    const riceAgg = agg.find(i => i.foodDefinitionId === 'ing_rice');
+    assert.strictEqual(riceAgg.consolidatedEaten, 150);
+
+    console.log('[CS-13] Optimization.applyConsolidatedToIngredients: PASSED');
+  }
+
+  // ── TEST 14: Nuclear Reset on unmarkAllIngredientsEaten ──
+  {
+    resetTestState();
+    state.eatenItems = {
+      'm1_ing_chicken': { eatenQuantity: 100, plannedQuantity: 100 }
+    };
+    state.ateSoFar = { ing_chicken: 100 };
+    state.result = {
+      mealResults: [
+        {
+          id: 'm1',
+          items: [{ id: 'ing_chicken', isEaten: true, eatenQuantity: 100 }]
+        }
+      ]
+    };
+
+    Optimization.unmarkAllIngredientsEaten();
+
+    assert.strictEqual(Object.keys(state.eatenItems).length, 0, 'eatenItems must be completely cleared');
+    assert.strictEqual(Object.keys(state.ateSoFar).length, 0, 'ateSoFar must be completely cleared');
+    assert.strictEqual(state.result.mealResults[0].items[0].isEaten, false);
+    assert.strictEqual(state.result.mealResults[0].items[0].eatenQuantity, 0);
+
+    console.log('[CS-14] Nuclear Reset on unmarkAllIngredientsEaten: PASSED');
+  }
+
+  // ── TEST 15: formatDailySummary includes Custom Foods in Copy Output ──
+  {
+    resetTestState();
+    const result = {
+      totals: { calories: 2000, protein: 140, carbs: 200, fat: 50 },
+      deviations: { calories: 0, protein: 0, carbs: 0, fat: 0 },
+      mealResults: [
+        {
+          id: 'meal_1',
+          name: 'Breakfast',
+          pct: 50,
+          calories: 1000,
+          targetCalories: 1000,
+          protein: 70,
+          carbs: 100,
+          fat: 25,
+          items: [
+            { name: 'Oats', quantity: 80, unit: 'g', servings: 2 }
+          ]
+        }
+      ]
+    };
+
+    const customFoods = [
+      {
+        id: 'cf_1',
+        name: 'Protein Shake',
+        meal: 'meal_1',
+        amount: 1,
+        unit: 'serving',
+        calories: 180,
+        protein: 30,
+        carbs: 5,
+        fat: 2
+      },
+      {
+        id: 'cf_2',
+        name: 'Apple',
+        meal: null, // unassigned
+        amount: 1,
+        unit: 'whole',
+        calories: 95,
+        protein: 0,
+        carbs: 25,
+        fat: 0
+      }
+    ];
+
+    const text = formatDailySummary(result, DEFAULT_TARGETS, customFoods);
+    assert.ok(text.includes('Custom · Protein Shake — 1 serving'), 'Assigned custom food must appear in meal section');
+    assert.ok(text.includes('CUSTOM FOODS (UNASSIGNED)'), 'Unassigned section header must appear');
+    assert.ok(text.includes('Custom · Apple — 1 whole'), 'Unassigned custom food must appear in unassigned section');
+
+    console.log('[CS-15] formatDailySummary Includes Custom Foods: PASSED');
   }
 }
 

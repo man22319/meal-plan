@@ -180,6 +180,22 @@ export const Persistence = {
           }
           if (parsedResult.eatenItems && typeof parsedResult.eatenItems === 'object') {
             state.eatenItems = parsedResult.eatenItems;
+            state.result.mealResults.forEach(meal => {
+              if (Array.isArray(meal.items)) {
+                meal.items.forEach(item => {
+                  const mealId = item.mealId || meal.id;
+                  const ingId = item.id || item.foodDefinitionId;
+                  const key = `${mealId}_${ingId}`;
+                  const rec = state.eatenItems[key];
+                  if (rec) {
+                    const eatenQty = typeof rec === 'object' ? (rec.eatenQuantity ?? rec.quantity ?? 0) : Number(rec);
+                    const plannedQty = item.plannedQuantity ?? item.quantity ?? 0;
+                    item.eatenQuantity = eatenQty;
+                    item.isEaten = eatenQty >= plannedQty;
+                  }
+                });
+              }
+            });
           }
         }
       }

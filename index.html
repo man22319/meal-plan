@@ -195,7 +195,12 @@
 
       <!-- ═══ WEIGHT TREND SUMMARY ═══ -->
       <section class="section" id="weight-trend-section">
-        <div class="section-header">Weight Trend Summary</div>
+        <div class="section-header">
+          <span>Weight Trend Summary</span>
+          <div class="section-header-actions">
+            <button type="button" class="btn btn-sm" id="copy-weight-summary-btn" title="Copy weight & nutritional trend summary to clipboard">Copy Summary</button>
+          </div>
+        </div>
         <div class="weight-stats-grid" id="weight-stats-grid">
           <!-- Populated by renderWeightTab() -->
         </div>

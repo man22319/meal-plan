@@ -5,6 +5,10 @@
 // Decoupled from MILP solver state.
 // Aggregation groups identical food definitions across meals.
 // Consumption derives non-negative remaining quantities and canonical remaining macros.
+//
+// Architecture: Individual meal item eatenQuantity is the SINGLE source of truth.
+// Consolidated Consumption is always an aggregate view of individual states.
+// Invariant: Σ eatenQuantity(foodDefId) = Consolidated eaten display
 
 import { generateId } from './state.js';
 
@@ -91,15 +95,119 @@ export function getCanonicalNutrientDensity(item) {
 }
 
 /**
+ * Resolves the eatenQuantity for a specific meal item from the eatenItems map.
+ *
+ * @param {string} mealId - Meal ID
+ * @param {string} ingId - Ingredient/food definition ID
+ * @param {Object} eatenItems - The eatenItems state map
+ * @returns {number} The eaten quantity (0 if not found)
+ */
+export function getItemEatenQuantity(mealId, ingId, eatenItems = {}) {
+  if (!eatenItems || typeof eatenItems !== 'object') return 0;
+  const key = `${mealId}_${ingId}`;
+  const rec = eatenItems[key];
+  if (rec && typeof rec === 'object') {
+    if (typeof rec.eatenQuantity === 'number' && rec.eatenQuantity > 0) {
+      return rec.eatenQuantity;
+    }
+    // Legacy support: old format stored { quantity } instead of { eatenQuantity }
+    if (typeof rec.quantity === 'number' && rec.quantity > 0) {
+      return rec.quantity;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Computes the consolidated eaten total for a food definition by summing
+ * eatenQuantity across all meal item instances.
+ *
+ * @param {string} foodDefId - The food definition ID to aggregate
+ * @param {Object} eatenItems - The eatenItems state map
+ * @param {Array} mealResults - Array of meal result objects with items[]
+ * @returns {number} Total eaten quantity across all meal instances
+ */
+export function getConsolidatedEaten(foodDefId, eatenItems = {}, mealResults = []) {
+  let total = 0;
+  if (!mealResults || !Array.isArray(mealResults)) return total;
+
+  mealResults.forEach(meal => {
+    if (!Array.isArray(meal.items)) return;
+    meal.items.forEach(item => {
+      const itemFoodId = item.foodDefinitionId || item.id;
+      if (itemFoodId === foodDefId) {
+        const mealId = item.mealId || meal.id;
+        const ingId = item.id || item.foodDefinitionId;
+        total += getItemEatenQuantity(mealId, ingId, eatenItems);
+      }
+    });
+  });
+
+  return total;
+}
+
+/**
+ * Distributes a consolidated eaten amount across individual meal item instances
+ * for a given food definition. Uses deterministic meal-order allocation:
+ * fills each item up to its plannedQuantity before moving to the next.
+ *
+ * Mutates the eatenItems map directly and also updates result items' isEaten flag.
+ *
+ * @param {string} foodDefId - The food definition ID to distribute for
+ * @param {number} totalEaten - The total amount to distribute
+ * @param {Array} mealResults - Array of meal result objects with items[]
+ * @param {Object} eatenItems - The current eatenItems state map (will be mutated)
+ * @returns {Object} Updated eatenItems map
+ */
+export function distributeConsolidatedEaten(foodDefId, totalEaten, mealResults, eatenItems = {}) {
+  if (!mealResults || !Array.isArray(mealResults)) return eatenItems;
+
+  let remaining = Math.max(0, totalEaten);
+
+  // Collect all instances of this food in meal order
+  mealResults.forEach(meal => {
+    if (!Array.isArray(meal.items)) return;
+    meal.items.forEach(item => {
+      const itemFoodId = item.foodDefinitionId || item.id;
+      if (itemFoodId !== foodDefId) return;
+
+      const mealId = item.mealId || meal.id;
+      const ingId = item.id || item.foodDefinitionId;
+      const key = `${mealId}_${ingId}`;
+      const planned = item.plannedQuantity ?? item.quantity ?? 0;
+      const allocate = Math.min(remaining, planned);
+
+      if (allocate > 0) {
+        eatenItems[key] = {
+          eatenQuantity: allocate,
+          plannedQuantity: planned
+        };
+        item.eatenQuantity = allocate;
+        item.isEaten = allocate >= planned;
+      } else {
+        delete eatenItems[key];
+        item.eatenQuantity = 0;
+        item.isEaten = false;
+      }
+
+      remaining -= allocate;
+    });
+  });
+
+  return eatenItems;
+}
+
+/**
  * Groups identical ingredients across meals by stable foodDefinitionId.
+ * Derives per-item eatenQuantity from the eatenItems state map.
  *
  * @param {Object} solverResult - State result containing mealResults
  * @param {Array} customFoods - Optional custom food entries from state
- * @param {Object} ateSoFar - Optional historical eaten amounts { [foodDefinitionId]: amount }
+ * @param {Object} eatenItems - Eaten items state map { "mealId_ingId": { eatenQuantity, plannedQuantity } }
  * @param {Array} knownIngredients - Optional ingredients database for metadata lookup
  * @returns {Array} List of consolidated food objects
  */
-export function aggregateIngredients(solverResult, customFoods = [], ateSoFar = {}, knownIngredients = []) {
+export function aggregateIngredients(solverResult, customFoods = [], eatenItems = {}, knownIngredients = []) {
   const groups = new Map();
 
   // 1. Group solver-allocated meal items
@@ -143,12 +251,19 @@ export function aggregateIngredients(solverResult, customFoods = [], ateSoFar = 
 
           group.plannedAmount += qty;
           group.totalServings += serv;
+
+          // Resolve per-item eaten quantity from eatenItems source of truth
+          const mealId = item.mealId || meal.id;
+          const ingId = item.id || item.foodDefinitionId;
+          const itemEaten = getItemEatenQuantity(mealId, ingId, eatenItems);
+
           group.meals.push({
-            mealId: meal.id,
+            mealId: mealId,
             mealName: meal.name,
             amount: qty,
             servings: serv,
-            unit: item.unit || group.unit
+            unit: item.unit || group.unit,
+            eatenQuantity: itemEaten
           });
         });
       }
@@ -194,17 +309,36 @@ export function aggregateIngredients(solverResult, customFoods = [], ateSoFar = 
         mealName: cf.meal || 'Custom Food',
         amount: qty,
         servings: group.servingSize > 0 ? qty / group.servingSize : 1,
-        unit: cf.unit || group.unit
+        unit: cf.unit || group.unit,
+        eatenQuantity: 0
       });
     });
   }
 
   // 3. Preserve unplanned items that were eaten (P = 0, E > 0)
-  if (ateSoFar && typeof ateSoFar === 'object') {
-    Object.keys(ateSoFar).forEach(foodDefId => {
-      const eatenVal = Number(ateSoFar[foodDefId]);
-      if (eatenVal > 0 && !groups.has(foodDefId)) {
-        // Look up known ingredients or custom foods for definition metadata
+  if (eatenItems && typeof eatenItems === 'object') {
+    Object.keys(eatenItems).forEach(key => {
+      const rec = eatenItems[key];
+      const eatenVal = typeof rec === 'object'
+        ? (rec.eatenQuantity || rec.quantity || 0)
+        : Number(rec);
+      if (eatenVal <= 0) return;
+
+      // Check if any group already accounts for this key
+      let found = false;
+      groups.forEach(group => {
+        group.meals.forEach(m => {
+          const checkKey = `${m.mealId}_${group.foodDefinitionId}`;
+          if (checkKey === key) found = true;
+        });
+      });
+
+      if (!found) {
+        // Extract foodDefId from key (format: "mealId_ingId")
+        const parts = key.split('_');
+        const foodDefId = parts.length > 1 ? parts.slice(1).join('_') : key;
+        if (groups.has(foodDefId)) return; // Already tracked
+
         const known = Array.isArray(knownIngredients)
           ? knownIngredients.find(i => i.id === foodDefId || i.name === foodDefId)
           : null;
@@ -234,29 +368,32 @@ export function aggregateIngredients(solverResult, customFoods = [], ateSoFar = 
     });
   }
 
-  // Calculate canonical densities for all groups
+  // Calculate canonical densities and derive consolidated eaten from individual items
   return Array.from(groups.values()).map(group => {
     const density = getCanonicalNutrientDensity(group);
+
+    // Consolidated eaten = Σ eatenQuantity across individual meal items
+    const consolidatedEaten = group.meals.reduce((sum, m) => sum + (m.eatenQuantity || 0), 0);
+
     return {
       ...group,
-      density
+      density,
+      consolidatedEaten
     };
   });
 }
 
 /**
  * Calculates consumption state, remaining quantities, and remaining macros
- * from aggregated foods and eaten amounts.
+ * from aggregated foods. Eaten amounts are derived from the individual
+ * meal item eatenQuantity values (single source of truth).
  *
  * Enforces core invariants:
+ *  - E_i = Σ eatenQuantity across meal instances (consolidated)
  *  - R_i = max(0, P_i - E_i)
- *  - E_i >= 0
- *  - P_i >= 0
- *  - R_i <= P_i
  *  - N_remaining,i = d_i * R_i (using canonical nutrient density)
  *
- * @param {Array} aggregatedFoods - Output of aggregateIngredients
- * @param {Object} ateSoFar - Object mapping foodDefinitionId -> amount eaten
+ * @param {Array} aggregatedFoods - Output of aggregateIngredients (includes consolidatedEaten)
  * @returns {Object} Consumption state with items and daily remaining totals
  */
 export function calculateConsumption(aggregatedFoods = [], ateSoFar = {}) {
@@ -266,12 +403,16 @@ export function calculateConsumption(aggregatedFoods = [], ateSoFar = {}) {
   const plannedTotals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
   aggregatedFoods.forEach(food => {
-    const rawEaten = Number(ateSoFar[food.foodDefinitionId]);
-    const eaten = (!isNaN(rawEaten) && rawEaten > 0) ? rawEaten : 0;
-    const planned = Math.max(0, food.plannedAmount);
+    // Eaten is derived from individual items (consolidatedEaten) or fallback to ateSoFar
+    const eaten = (typeof food.consolidatedEaten === 'number' && food.consolidatedEaten > 0)
+      ? food.consolidatedEaten
+      : (typeof ateSoFar?.[food.foodDefinitionId] === 'number'
+          ? ateSoFar[food.foodDefinitionId]
+          : (typeof food.consolidatedEaten === 'number' ? food.consolidatedEaten : 0));
+    const planned = Math.max(0, food.plannedAmount ?? 0);
     const remaining = Math.max(0, planned - eaten);
 
-    const d = food.density;
+    const d = food.density || getCanonicalNutrientDensity(food);
 
     // Remaining macros from canonical density
     const remCal = d.caloriesPerUnit * remaining;

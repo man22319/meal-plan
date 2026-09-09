@@ -275,6 +275,32 @@ input[type="number"].ate-so-far-input:focus {
   min-width: 22px;
 }
 
+.btn-apply-eaten {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  color: var(--white);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-apply-eaten:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: var(--border-hi);
+  color: var(--white);
+}
+
+.btn-apply-eaten:active {
+  transform: scale(0.96);
+}
+
 .col-remaining {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.88rem;

@@ -56,6 +56,19 @@
   text-transform: uppercase;
 }
 
+.partial-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+  color: #e6c07b;
+  background: rgba(230, 192, 123, 0.12);
+  border: 1px solid rgba(230, 192, 123, 0.28);
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
 .hold-progress {
   position: absolute;
   inset: 0;

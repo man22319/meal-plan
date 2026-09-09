@@ -4,6 +4,7 @@
 
 import {
   formatDailySummary,
+  formatWeightAndNutritionSummary,
   formatPercent,
   formatCalorieDeviation,
   formatMacroDeviation
@@ -321,6 +322,81 @@ console.log('══════════════════════�
   assert('Test G: Daily summary formats near-zero calorie deviation as (0.0%)',
     summaryText.includes('Calories: 2499 / 2500 kcal (-1 kcal, 0.0%)'), `Got:\n${summaryText}`);
 }
+
+// ── TEST H: Weight & Nutritional Trend Summary ──
+{
+  const weightHistory = {
+    '2026-08-20': { weight: 187.0 },
+    '2026-08-21': { weight: 186.5 },
+    '2026-08-23': { weight: 185.8 },
+    '2026-08-24': { weight: 185.4 },
+    '2026-08-25': { weight: 184.3 }
+  };
+
+  const intakeHistory = {
+    '2026-08-23': {
+      totals: { calories: 2000, protein: 150, carbs: 200, fat: 50 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    },
+    '2026-08-24': {
+      totals: { calories: 2100, protein: 160, carbs: 210, fat: 55 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    },
+    '2026-08-25': {
+      totals: { calories: 2200, protein: 170, carbs: 220, fat: 60 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    }
+  };
+
+  const targets = { calories: 2000, protein: 150, carbs: 200, fat: 50 };
+
+  // 1. Full data with 7-day window
+  const fullText = formatWeightAndNutritionSummary({
+    weightHistory,
+    intakeHistory,
+    targets,
+    windowDays: 7,
+    referenceDate: '2026-08-25'
+  });
+
+  assert('Test H: Contains header and date', fullText.includes('WEIGHT & NUTRITIONAL TREND SUMMARY\nDate: 2026-08-25'));
+  assert('Test H: Formats current weight', fullText.includes('Current: 184.3 lb'));
+  assert('Test H: Formats 7-day avg weight', fullText.includes('7-Day Avg: 185.8 lb'));
+  assert('Test H: Formats 14-day avg weight', fullText.includes('14-Day Avg: 185.8 lb'));
+  assert('Test H: Formats weight trend rate', fullText.includes('Rate: -'));
+  assert('Test H: Contains nutritional trend section header', fullText.includes('NUTRITIONAL TREND (7-DAY WINDOW)'));
+  assert('Test H: Formats distinct logged days', fullText.includes('Logged: 3 / 7 days'));
+  assert('Test H: Formats calories with mean, SD, and target deviation', fullText.includes('Calories: 2,100 kcal/day (±100) | Target: 2,000 kcal (+100 kcal, +5.0%)'));
+  assert('Test H: Formats carbs with mean, SD, and target deviation', fullText.includes('Carbs: 210.0 g/day (±10.0) | Target: 200.0 g (+10.0 g, +5.0%)'));
+  assert('Test H: Formats fat with mean, SD, and target deviation', fullText.includes('Fat: 55.0 g/day (±5.0) | Target: 50.0 g (+5.0 g, +10.0%)'));
+  assert('Test H: Formats protein with mean, SD, and target deviation', fullText.includes('Protein: 160.0 g/day (±10.0) | Target: 150.0 g (+10.0 g, +6.7%)'));
+  assert('Test H: Formats macro split line', fullText.includes('Macro Split: 42.5% C / 25.1% F / 32.4% P'));
+
+  // 2. Empty data handling
+  const emptyText = formatWeightAndNutritionSummary({
+    weightHistory: {},
+    intakeHistory: {},
+    referenceDate: '2026-08-25'
+  });
+  assert('Test H: Empty weight displays dash', emptyText.includes('Current: —') && emptyText.includes('7-Day Avg: —') && emptyText.includes('Rate: —'));
+  assert('Test H: Empty intake displays 0 logged days and notice', emptyText.includes('Logged: 0 / 7 days') && emptyText.includes('No intake snapshots recorded in this period.'));
+
+  // 3. Custom window (14-day)
+  const window14Text = formatWeightAndNutritionSummary({
+    weightHistory,
+    intakeHistory,
+    targets,
+    windowDays: 14,
+    referenceDate: '2026-08-25'
+  });
+  assert('Test H: Custom window header displays 14-DAY WINDOW', window14Text.includes('NUTRITIONAL TREND (14-DAY WINDOW)'));
+  assert('Test H: Custom window logged days displays / 14 days', window14Text.includes('Logged: 3 / 14 days'));
+
+  // 4. Default options call
+  const defaultText = formatWeightAndNutritionSummary();
+  assert('Test H: Calling with no arguments does not crash', typeof defaultText === 'string' && defaultText.includes('WEIGHT & NUTRITIONAL TREND SUMMARY'));
+}
+
 
 console.log('\n═══════════════════════════════════════════════════════════════════');
 if (failed === 0) {

@@ -4,7 +4,7 @@
 
 import { state, generateId } from './core/state.js';
 import { Optimization } from './core/solver.js';
-import { formatDailySummary } from './core/formatters.js';
+import { formatDailySummary, formatWeightAndNutritionSummary } from './core/formatters.js';
 import { Persistence, ImportExport } from './io/persistence.js';
 import { UI } from './ui/render.js';
 import { recordWeightEntry } from './core/history.js';
@@ -15,7 +15,7 @@ function setupEventListeners() {
   const copyBtn = document.getElementById('copy-summary-btn');
   copyBtn?.addEventListener('click', async () => {
     if (!state.result) return;
-    const summary = formatDailySummary(state.result, state.targets);
+    const summary = formatDailySummary(state.result, state.targets, state.customFoods);
 
     if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
       UI.showErrors(['Clipboard unavailable. Please allow clipboard permissions.']);
@@ -34,13 +34,64 @@ function setupEventListeners() {
     }
   });
 
-  // Uneaten all
+  // Copy weight & nutritional trend summary
+  const copyWeightBtn = document.getElementById('copy-weight-summary-btn');
+  copyWeightBtn?.addEventListener('click', async () => {
+    const activeDays = UI.getActiveNutritionWindowDays ? UI.getActiveNutritionWindowDays() : 7;
+    const summary = formatWeightAndNutritionSummary({
+      weightHistory: state.weightHistory,
+      intakeHistory: state.intakeHistory,
+      targets: state.targets,
+      windowDays: activeDays,
+      referenceDate: getLocalDateString()
+    });
+
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(summary);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+      const originalText = copyWeightBtn.textContent;
+      copyWeightBtn.textContent = 'COPIED';
+      setTimeout(() => {
+        copyWeightBtn.textContent = originalText;
+      }, 1500);
+    } catch {
+      // Fallback attempt with textarea
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = summary;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) {
+          const originalText = copyWeightBtn.textContent;
+          copyWeightBtn.textContent = 'COPIED';
+          setTimeout(() => {
+            copyWeightBtn.textContent = originalText;
+          }, 1500);
+          return;
+        }
+      } catch {
+        // Fallback failed
+      }
+      UI.showErrors(['Clipboard write failed. Please check clipboard permissions.']);
+    }
+  });
+
+  // Uneaten all — nuclear reset of ALL consumption state
   document.getElementById('uneaten-all-btn')?.addEventListener('click', () => {
     const hasEaten = Boolean(state.eatenItems && Object.keys(state.eatenItems).length > 0) ||
+      Boolean(state.ateSoFar && Object.keys(state.ateSoFar).length > 0) ||
       Boolean(state.result?.mealResults?.some(m => m.items?.some(it => it.isEaten)));
     if (!hasEaten) return;
 
-    if (window.confirm('Clear all EATEN markers? Recorded actual quantities will be preserved.')) {
+    if (window.confirm('Reset all consumption? This clears all EATEN markers and consumption amounts.')) {
       Optimization.unmarkAllIngredientsEaten();
       Persistence.save();
       UI.renderResults({ scroll: false });

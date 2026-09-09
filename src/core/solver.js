@@ -11,6 +11,7 @@ import { state, ensureId, generateId, copyMeal } from './state.js';
 import { Validation } from './validation.js';
 import { PRECISION } from './precision.js';
 import { getRemainingTargets, getRemainingMealTarget, aggregateCustomFoods } from './customFoods.js';
+import { distributeConsolidatedEaten } from './consumption.js';
 
 export function calculateMacroCalories(pOrObj, carbs, fat) {
   if (typeof pOrObj === 'object' && pOrObj !== null) {
@@ -697,6 +698,9 @@ export const Optimization = {
 
     if (!preserveActuals) {
       state.actuals = {};
+      // New solve = fresh consumption state
+      state.eatenItems = {};
+      state.ateSoFar = {};
     }
 
     state.meals.forEach((m, idx) => ensureId(m, `meal_${idx}`));
@@ -752,13 +756,17 @@ export const Optimization = {
       return { errors: ['No solved quantity to lock. Press SOLVE first.'] };
     }
     if (!state.eatenItems) state.eatenItems = {};
+    const eatenQty = Number(item.quantity);
     state.eatenItems[`${mealId}_${ingId}`] = {
-      quantity: Number(item.quantity),
-      servings: item.servings,
+      eatenQuantity: eatenQty,
       plannedQuantity: item.plannedQuantity,
+      // Legacy fields preserved for backward compatibility
+      quantity: eatenQty,
+      servings: item.servings,
       actualQuantity: item.actualQuantity ?? null
     };
     item.isEaten = true;
+    item.eatenQuantity = eatenQty;
     return { result: state.result };
   },
 
@@ -767,7 +775,10 @@ export const Optimization = {
     if (!state.eatenItems) return { result: state.result };
     delete state.eatenItems[`${mealId}_${ingId}`];
     const item = findResultItem(mealId, ingId);
-    if (item) item.isEaten = false;
+    if (item) {
+      item.isEaten = false;
+      item.eatenQuantity = 0;
+    }
     return { result: state.result };
   },
 
@@ -784,16 +795,36 @@ export const Optimization = {
   },
 
   unmarkAllIngredientsEaten() {
+    // Nuclear reset: clear all consumption state
     state.eatenItems = {};
+    state.ateSoFar = {};
     if (state.result?.mealResults) {
       state.result.mealResults.forEach(meal => {
         if (Array.isArray(meal.items)) {
           meal.items.forEach(item => {
             item.isEaten = false;
+            item.eatenQuantity = 0;
           });
         }
       });
     }
+    return { result: state.result };
+  },
+
+  /**
+   * Distributes a consolidated eaten amount across individual meal item instances
+   * for a given food definition, using deterministic meal-order allocation.
+   *
+   * @param {string} foodDefId - The food definition ID
+   * @param {number} totalEaten - The total amount to distribute
+   * @returns {Object} Result containing updated state
+   */
+  applyConsolidatedToIngredients(foodDefId, totalEaten) {
+    if (!state.result?.mealResults) {
+      return { errors: ['No solver results available.'] };
+    }
+    if (!state.eatenItems) state.eatenItems = {};
+    distributeConsolidatedEaten(foodDefId, totalEaten, state.result.mealResults, state.eatenItems);
     return { result: state.result };
   },
 
