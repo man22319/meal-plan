@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════
 
 import assert from 'node:assert';
-import { state, DEFAULT_INGREDIENTS, DEFAULT_TARGETS, DEFAULT_MEALS } from '../src/core/state.js';
+import { state, DEFAULT_INGREDIENTS, DEFAULT_TARGETS, DEFAULT_MEALS, generateStateFingerprint } from '../src/core/state.js';
 import {
   addCustomFood,
   updateCustomFood,
@@ -13,7 +13,11 @@ import {
   getRemainingMealTarget,
   detectInfeasibleDimensions,
   isValidCustomFoodEntry,
-  resolveMeal
+  resolveMeal,
+  normalizeCustomFood,
+  validateCustomFood,
+  getPlanningValue,
+  getRecordedValue
 } from '../src/core/customFoods.js';
 import { solveModel } from '../src/core/solver.js';
 import { createIntakeSnapshot, recordIntakeSnapshot } from '../src/core/history.js';
@@ -105,6 +109,28 @@ export function runCustomFoodsTestSuite() {
   const removeRes = removeCustomFood(res.entry.id);
   assert.ok(removeRes.removed);
   assert.strictEqual(state.customFoods.length, 0);
+
+  // Normalize nested compatibility input into canonical flat representation
+  const normalized = normalizeCustomFood({
+    name: 'Nested Burrito',
+    amount: 1,
+    unit: 'wrap',
+    calories: { value: 700, status: 'estimated', range: { min: 600, max: 850 } },
+    protein: { value: 35, status: 'known' },
+    carbs: { value: null, status: 'unknown' },
+    fat: 25
+  });
+  assert.strictEqual(normalized.calories, 700);
+  assert.strictEqual(normalized.confidence.calories, 'estimated');
+  assert.deepStrictEqual(normalized.ranges.calories, { min: 600, max: 850 });
+  assert.strictEqual(normalized.protein, 35);
+  assert.strictEqual(normalized.confidence.protein, 'known');
+  assert.strictEqual(normalized.ranges.protein, null);
+  assert.strictEqual(normalized.carbs, null);
+  assert.strictEqual(normalized.confidence.carbs, 'unknown');
+  assert.strictEqual(normalized.ranges.carbs, null);
+  assert.strictEqual(normalized.fat, 25);
+  assert.strictEqual(normalized.confidence.fat, 'known');
 
   console.log('[CF-1] CRUD Operations & ID Generation: PASSED');
 }
@@ -215,80 +241,347 @@ export function runCustomFoodsTestSuite() {
   console.log('[CF-4] Partial Unknowns Across Multiple Custom Foods: PASSED');
 }
 
-// ── TEST 5: Estimated Foods Still Participate in Optimization ──
+// ── TEST 5: Known value uses recorded value ──
 {
   resetTestState();
   addCustomFood({
-    name: 'Food A (Known)',
+    name: 'Known Food',
     amount: 1,
     unit: 'item',
-    calories: 400,
-    protein: 20,
-    carbs: 50,
-    fat: 10,
+    calories: 700,
+    protein: 35,
+    carbs: 80,
+    fat: 25,
     confidence: { calories: 'known', protein: 'known', carbs: 'known', fat: 'known' }
   });
-  addCustomFood({
-    name: 'Food B (Estimated)',
-    amount: 1,
-    unit: 'item',
-    calories: 200,
-    protein: 10,
-    carbs: 20,
-    fat: 5,
-    confidence: { calories: 'estimated', protein: 'estimated', carbs: 'estimated', fat: 'estimated' }
-  });
-
-  const remaining = getRemainingTargets(state.targets);
-  assert.strictEqual(remaining.calories.value, 2335 - 600, 'Estimated foods participate in subtraction');
-  assert.strictEqual(remaining.protein.value, 151 - 30);
-  assert.strictEqual(remaining.carbs.value, 291 - 70);
-  assert.strictEqual(remaining.fat.value, 62 - 15);
-
-  console.log('[CF-5] Estimated Foods Participate in Optimization: PASSED');
+  assert.strictEqual(getPlanningValue('calories', state.customFoods[0]), 700);
+  assert.strictEqual(getRecordedValue('calories', state.customFoods[0]), 700);
+  console.log('[CF-5] Known value uses recorded value: PASSED');
 }
 
-// ── TEST 6: Meal-Level Target Subtraction ──
+// ── TEST 6: Estimated value without range uses recorded estimate ──
 {
   resetTestState();
-  // Lunch is 20% of 2335 = 467 kcal
-  const lunchCalTarget = 0.20 * 2335;
-
   addCustomFood({
-    name: 'Lunch Wrap',
+    name: 'Estimated No Range',
     amount: 1,
-    unit: 'wrap',
-    calories: 300,
-    protein: 25,
-    carbs: 30,
-    fat: 10,
-    meal: 'meal_lunch'
+    unit: 'item',
+    calories: 700,
+    protein: 35,
+    carbs: 80,
+    fat: 25,
+    confidence: { calories: 'estimated', protein: 'known', carbs: 'known', fat: 'known' }
   });
-  addCustomFood({
-    name: 'Unassigned Snack',
-    amount: 1,
-    unit: 'pack',
-    calories: 150,
-    protein: 5,
-    carbs: 20,
-    fat: 5,
-    meal: null
-  });
-
-  // Lunch remaining target
-  const lunchRemaining = getRemainingMealTarget('meal_lunch', lunchCalTarget);
-  assert.strictEqual(lunchRemaining.consumed, 300, 'Lunch consumed tracks only lunch-assigned food');
-  assert.strictEqual(lunchRemaining.value, lunchCalTarget - 300, 'Lunch remaining subtracts lunch custom food');
-
-  // Breakfast remaining target (no custom foods)
-  const bfastRemaining = getRemainingMealTarget('meal_breakfast', 0.40 * 2335);
-  assert.strictEqual(bfastRemaining.consumed, 0);
-  assert.strictEqual(bfastRemaining.value, 0.40 * 2335);
-
-  console.log('[CF-6] Meal-Level Target Subtraction: PASSED');
+  assert.strictEqual(getPlanningValue('calories', state.customFoods[0]), 700);
+  assert.strictEqual(getRecordedValue('calories', state.customFoods[0]), 700);
+  console.log('[CF-6] Estimated value without range uses recorded estimate: PASSED');
 }
 
-// ── TEST 7: Infeasibility Detection ──
+// ── TEST 7: Estimated value with range uses midpoint ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Estimated With Range',
+    amount: 1,
+    unit: 'item',
+    calories: 700,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 850 } }
+  });
+  assert.strictEqual(getPlanningValue('calories', state.customFoods[0]), 725, 'Midpoint of 600 and 850 is 725');
+  assert.strictEqual(getRecordedValue('calories', state.customFoods[0]), 700, 'Recorded value remains 700');
+  console.log('[CF-7] Estimated value with range uses midpoint: PASSED');
+}
+
+// ── TEST 8: Displayed value remains the recorded estimate ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Display Check',
+    amount: 1,
+    unit: 'item',
+    calories: 700,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 850 } }
+  });
+  const cf = state.customFoods[0];
+  const isEstCal = cf.confidence?.calories === 'estimated';
+  const recordedCal = getRecordedValue('calories', cf);
+  const calStr = recordedCal !== null ? `${isEstCal ? '~' : ''}${Math.round(recordedCal)} kcal` : '—';
+  assert.strictEqual(calStr, '~700 kcal', 'Displayed value is recorded estimate with tilde');
+  console.log('[CF-8] Displayed value remains the recorded estimate: PASSED');
+}
+
+// ── TEST 9: Daily remaining targets use planning values ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Planning Target Food',
+    amount: 1,
+    unit: 'item',
+    calories: 700,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 850 } }
+  });
+  const remaining = getRemainingTargets(state.targets);
+  assert.strictEqual(remaining.calories.value, 2335 - 725, 'Daily remaining uses planning value 725');
+  assert.strictEqual(remaining.calories.consumed, 725);
+  console.log('[CF-9] Daily remaining targets use planning values: PASSED');
+}
+
+// ── TEST 10: Meal remaining targets use planning values ──
+{
+  resetTestState();
+  const lunchCalTarget = 0.20 * 2335;
+  addCustomFood({
+    name: 'Lunch Food',
+    amount: 1,
+    unit: 'item',
+    calories: 700,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 850 } },
+    meal: 'meal_lunch'
+  });
+  const lunchRemaining = getRemainingMealTarget('meal_lunch', lunchCalTarget);
+  assert.strictEqual(lunchRemaining.consumed, 725, 'Meal consumed uses planning value 725');
+  assert.strictEqual(lunchRemaining.value, lunchCalTarget - 725, 'Meal remaining subtracts planning value 725');
+  console.log('[CF-10] Meal remaining targets use planning values: PASSED');
+}
+
+// ── TEST 11: Unknown contributes no numerical constraint ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Partial Unknown Food',
+    amount: 1,
+    unit: 'item',
+    calories: 500,
+    protein: null,
+    carbs: 60,
+    fat: 15
+  });
+  assert.strictEqual(getPlanningValue('protein', state.customFoods[0]), null);
+  const remaining = getRemainingTargets(state.targets);
+  assert.strictEqual(remaining.protein.known, false);
+  assert.strictEqual(remaining.protein.value, state.targets.protein, 'Unknown macro target is unconstrained');
+  assert.strictEqual(remaining.calories.value, 2335 - 500, 'Known calories are subtracted');
+  console.log('[CF-11] Unknown contributes no numerical constraint: PASSED');
+}
+
+// ── TEST 12: Different nutrient ranges are independently transformed ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Multi-Range Burrito',
+    amount: 1,
+    unit: 'wrap',
+    calories: 700,
+    protein: 35,
+    carbs: 80,
+    fat: 25,
+    confidence: {
+      calories: 'estimated',
+      protein: 'estimated',
+      carbs: 'estimated',
+      fat: 'estimated'
+    },
+    ranges: {
+      calories: { min: 600, max: 850 },
+      protein: { min: 30, max: 40 },
+      carbs: { min: 65, max: 95 },
+      fat: { min: 20, max: 30 }
+    }
+  });
+  const cf = state.customFoods[0];
+  assert.strictEqual(getPlanningValue('calories', cf), 725);
+  assert.strictEqual(getPlanningValue('protein', cf), 35);
+  assert.strictEqual(getPlanningValue('carbs', cf), 80);
+  assert.strictEqual(getPlanningValue('fat', cf), 25);
+  console.log('[CF-12] Different nutrient ranges independently transformed: PASSED');
+}
+
+// ── TEST 13: Multiple estimated foods aggregate their planning values correctly ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Est Food 1',
+    amount: 1,
+    unit: 'serving',
+    calories: 700,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 850 } } // midpoint 725
+  });
+  addCustomFood({
+    name: 'Est Food 2',
+    amount: 1,
+    unit: 'serving',
+    calories: 350,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 300, max: 400 } } // midpoint 350
+  });
+  const planningAgg = aggregateCustomFoods(null, state.customFoods, { usePlanning: true });
+  const recordedAgg = aggregateCustomFoods(null, state.customFoods, { usePlanning: false });
+  assert.strictEqual(planningAgg.calories.total, 725 + 350, 'Planning aggregation sums midpoints: 1075');
+  assert.strictEqual(recordedAgg.calories.total, 700 + 350, 'Recorded aggregation sums user estimates: 1050');
+  console.log('[CF-13] Multiple estimated foods aggregate planning values correctly: PASSED');
+}
+
+// ── TEST 14: Known food with identical numeric value to an estimate remains semantically different ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Known 700',
+    amount: 1,
+    unit: 'serving',
+    calories: 700,
+    confidence: { calories: 'known' }
+  });
+  addCustomFood({
+    name: 'Estimated 700',
+    amount: 1,
+    unit: 'serving',
+    calories: 700,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 850 } }
+  });
+  const foodKnown = state.customFoods[0];
+  const foodEst = state.customFoods[1];
+  assert.strictEqual(foodKnown.confidence.calories, 'known');
+  assert.strictEqual(foodEst.confidence.calories, 'estimated');
+  assert.strictEqual(getPlanningValue('calories', foodKnown), 700);
+  assert.strictEqual(getPlanningValue('calories', foodEst), 725);
+  console.log('[CF-14] Known vs Estimated semantic difference: PASSED');
+}
+
+// ── TEST 15: Invalid ranges are rejected ──
+{
+  // min > max
+  const err1 = validateCustomFood({
+    name: 'Bad 1', amount: 1, unit: 'g', calories: 700,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 800, max: 700 } }
+  });
+  assert.ok(err1.some(e => e.includes('cannot be greater than max')));
+
+  // value < min
+  const err2 = validateCustomFood({
+    name: 'Bad 2', amount: 1, unit: 'g', calories: 500,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 800 } }
+  });
+  assert.ok(err2.some(e => e.includes('must fall within the evidence range')));
+
+  // value > max
+  const err3 = validateCustomFood({
+    name: 'Bad 3', amount: 1, unit: 'g', calories: 900,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 800 } }
+  });
+  assert.ok(err3.some(e => e.includes('must fall within the evidence range')));
+
+  // min < 0
+  const err4 = validateCustomFood({
+    name: 'Bad 4', amount: 1, unit: 'g', calories: 100,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: -10, max: 200 } }
+  });
+  assert.ok(err4.some(e => e.includes('must be a non-negative number')));
+
+  // range on known
+  const err5 = validateCustomFood({
+    name: 'Bad 5', amount: 1, unit: 'g', calories: 700,
+    confidence: { calories: 'known' },
+    ranges: { calories: { min: 600, max: 800 } }
+  });
+  assert.ok(err5.some(e => e.includes('cannot be supplied for known nutrients')));
+
+  // range on unknown
+  const err6 = validateCustomFood({
+    name: 'Bad 6', amount: 1, unit: 'g', calories: null,
+    confidence: { calories: 'unknown' },
+    ranges: { calories: { min: 600, max: 800 } }
+  });
+  assert.ok(err6.some(e => e.includes('cannot be supplied for unknown nutrients')));
+
+  console.log('[CF-15] Invalid ranges are rejected: PASSED');
+}
+
+// ── TEST 16: Atwater reconciliation receives planning nutrient values ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Burrito (Estimated with ranges)',
+    amount: 1,
+    unit: 'wrap',
+    calories: 700,
+    protein: 35,
+    carbs: 80,
+    fat: 25,
+    confidence: {
+      calories: 'estimated',
+      protein: 'estimated',
+      carbs: 'known',
+      fat: 'known'
+    },
+    ranges: {
+      calories: { min: 600, max: 850 },
+      protein: { min: 30, max: 40 }
+    }
+  });
+
+  const outcomeEst = solveModel(state);
+  assert.strictEqual(outcomeEst.feasible, true);
+
+  // Compare with identical planning numbers provided as known:
+  resetTestState();
+  addCustomFood({
+    name: 'Burrito (Known planning equivalents)',
+    amount: 1,
+    unit: 'wrap',
+    calories: 725,
+    protein: 35,
+    carbs: 80,
+    fat: 25,
+    confidence: { calories: 'known', protein: 'known', carbs: 'known', fat: 'known' }
+  });
+  const outcomeKnown = solveModel(state);
+  assert.strictEqual(outcomeKnown.feasible, true);
+
+  // Both models face identical remaining targets and produce identical solver solutions
+  assert.strictEqual(outcomeEst.result.totals.calories, outcomeKnown.result.totals.calories);
+  assert.strictEqual(outcomeEst.result.totals.protein, outcomeKnown.result.totals.protein);
+  assert.strictEqual(outcomeEst.result.totals.carbs, outcomeKnown.result.totals.carbs);
+  assert.strictEqual(outcomeEst.result.totals.fat, outcomeKnown.result.totals.fat);
+
+  console.log('[CF-16] Atwater reconciliation receives planning values: PASSED');
+}
+
+// ── TEST 17: Range changes invalidate the solved plan ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Range Invalidation Food',
+    amount: 1,
+    unit: 'item',
+    calories: 750,
+    confidence: { calories: 'estimated' },
+    ranges: { calories: { min: 600, max: 850 } }
+  });
+
+  const fp1 = generateStateFingerprint(state);
+
+  // Update evidence range to [700, 900] (shifts midpoint to 800)
+  updateCustomFood(state.customFoods[0].id, {
+    ranges: { calories: { min: 700, max: 900 } }
+  });
+
+  const fp2 = generateStateFingerprint(state);
+  assert.notStrictEqual(fp1, fp2, 'Fingerprint changes when evidence range changes');
+
+  console.log('[CF-17] Range changes invalidate the solved plan: PASSED');
+}
+
+// ── TEST 18: Infeasibility Detection ──
 {
   resetTestState();
   addCustomFood({
@@ -308,10 +601,10 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(issues[0].consumed, 70);
   assert.strictEqual(issues[0].deficit, 8);
 
-  console.log('[CF-7] Infeasibility Detection: PASSED');
+  console.log('[CF-18] Infeasibility Detection: PASSED');
 }
 
-// ── TEST 8: Discarding Malformed Entries in Persistence ──
+// ── TEST 19: Discarding Malformed Entries in Persistence ──
 {
   assert.strictEqual(isValidCustomFoodEntry(null), false);
   assert.strictEqual(isValidCustomFoodEntry({}), false);
@@ -321,10 +614,10 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(isValidCustomFoodEntry({ id: 'cf_1', name: 'Apple', amount: 1, unit: 'g', calories: -50 }), false);
   assert.strictEqual(isValidCustomFoodEntry({ id: 'cf_1', name: 'Apple', amount: 1, unit: 'g', calories: 95, protein: null }), true);
 
-  console.log('[CF-8] Discarding Malformed Entries: PASSED');
+  console.log('[CF-19] Discarding Malformed Entries: PASSED');
 }
 
-// ── TEST 9: Full End-to-End MILP Solver Optimization with Custom Foods ──
+// ── TEST 20: Full End-to-End MILP Solver Optimization with Custom Foods ──
 {
   resetTestState();
   addCustomFood({
@@ -360,10 +653,10 @@ export function runCustomFoodsTestSuite() {
   // Deviations evaluated against original target
   assert.ok(Math.abs(r.combinedDeviations.calories.absolute) < 60, `Combined deviation within compromise: ${r.combinedDeviations.calories.absolute}`);
 
-  console.log('[CF-9] End-to-End Solver Optimization with Custom Foods: PASSED');
+  console.log('[CF-20] End-to-End Solver Optimization with Custom Foods: PASSED');
 }
 
-// ── TEST 10: Snapshot Baseline Invariance (No Custom Foods) ──
+// ── TEST 21: Snapshot Baseline Invariance (No Custom Foods) ──
 {
   resetTestState();
   const outcome = solveModel(state);
@@ -393,10 +686,10 @@ export function runCustomFoodsTestSuite() {
   resetTestState();
   assert.strictEqual(createIntakeSnapshot(state, '2026-09-02'), null);
 
-  console.log('[CF-10] Snapshot Baseline Invariance (No Custom Foods): PASSED');
+  console.log('[CF-21] Snapshot Baseline Invariance (No Custom Foods): PASSED');
 }
 
-// ── TEST 11: Standalone Custom Food Snapshot Without Solver Result ──
+// ── TEST 22: Standalone Custom Food Snapshot Without Solver Result ──
 {
   resetTestState();
   state.result = null; // No solver run!
@@ -427,10 +720,10 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(snap.totals.fat, 20);
   assert.strictEqual(snap.totals.caloriesUnknown, false);
 
-  console.log('[CF-11] Standalone Custom Food Snapshot Without Solver Result: PASSED');
+  console.log('[CF-22] Standalone Custom Food Snapshot Without Solver Result: PASSED');
 }
 
-// ── TEST 12: Combined Solver Ingredients + Custom Foods Snapshot ──
+// ── TEST 23: Combined Solver Ingredients + Custom Foods Snapshot ──
 {
   resetTestState();
   const outcome = solveModel(state);
@@ -473,10 +766,10 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(snap.totals.calories, expectedCal);
   assert.strictEqual(snap.totals.protein, expectedPro);
 
-  console.log('[CF-12] Combined Solver Ingredients + Custom Foods Snapshot: PASSED');
+  console.log('[CF-23] Combined Solver Ingredients + Custom Foods Snapshot: PASSED');
 }
 
-// ── TEST 13: Multiple Custom Foods & Duplicate Counting Invariant ──
+// ── TEST 24: Multiple Custom Foods & Duplicate Counting Invariant ──
 {
   resetTestState();
   const outcome = solveModel(state);
@@ -536,10 +829,10 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(appleEntries[0].mealName, 'Unassigned');
   assert.strictEqual(appleEntries[0].mealId, null);
 
-  console.log('[CF-13] Multiple Custom Foods & Duplicate Counting Invariant: PASSED');
+  console.log('[CF-24] Multiple Custom Foods & Duplicate Counting Invariant: PASSED');
 }
 
-// ── TEST 14: Partial and Unknown Macro Semantics ──
+// ── TEST 25: Partial and Unknown Macro Semantics ──
 {
   resetTestState();
   // Case A: 1 eaten ingredient (with protein) + 1 custom food with unknown protein
@@ -588,10 +881,10 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(snapB.totals.fat, 15);
   assert.strictEqual(snapB.totals.fatUnknown, false);
 
-  console.log('[CF-14] Partial and Unknown Macro Semantics: PASSED');
+  console.log('[CF-25] Partial and Unknown Macro Semantics: PASSED');
 }
 
-// ── TEST 15: Schema Hygiene, Persistence & Longitudinal Stats Integration ──
+// ── TEST 26: Schema Hygiene, Persistence & Longitudinal Stats Integration ──
 {
   resetTestState();
   state.result = null;
@@ -650,7 +943,7 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(sep2.protein, null);
   assert.strictEqual(sep2.calories, 2200);
 
-  console.log('[CF-15] Schema Hygiene, Persistence & Longitudinal Stats Integration: PASSED');
+  console.log('[CF-26] Schema Hygiene, Persistence & Longitudinal Stats Integration: PASSED');
 }
 
   // Reset state back to defaults so other test suites are clean

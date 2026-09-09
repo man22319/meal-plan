@@ -22,7 +22,8 @@ import {
   aggregateCustomFoods,
   detectInfeasibleDimensions,
   resolveMeal,
-  UNIT_OPTIONS
+  UNIT_OPTIONS,
+  validateCustomFood
 } from '../core/customFoods.js';
 import {
   aggregateIngredients,
@@ -640,6 +641,11 @@ export const UI = {
     const carbVal = isEdit && food.carbs !== null ? food.carbs : '';
     const fatVal = isEdit && food.fat !== null ? food.fat : '';
 
+    const rangeCal = isEdit && food.ranges?.calories ? food.ranges.calories : null;
+    const rangePro = isEdit && food.ranges?.protein ? food.ranges.protein : null;
+    const rangeCarb = isEdit && food.ranges?.carbs ? food.ranges.carbs : null;
+    const rangeFat = isEdit && food.ranges?.fat ? food.ranges.fat : null;
+
     const mealVal = isEdit ? (food.meal || '') : '';
 
     const confCal = isEdit && food.confidence?.calories ? food.confidence.calories : 'known';
@@ -678,6 +684,14 @@ export const UI = {
             <button type="button" class="cf-conf-btn ${confCal !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
             <button type="button" class="cf-conf-btn est ${confCal === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
           </div>
+          <div class="cf-range-row ${confCal === 'estimated' ? '' : 'hidden'}" data-range-macro="calories">
+            <div class="cf-range-label">Range (opt)</div>
+            <div class="cf-range-inputs">
+              <input type="number" id="cf-range-min-cal" class="cf-input-range" min="0" step="1" placeholder="Min" value="${rangeCal?.min ?? ''}" inputmode="numeric" />
+              <span class="cf-range-sep">–</span>
+              <input type="number" id="cf-range-max-cal" class="cf-input-range" min="0" step="1" placeholder="Max" value="${rangeCal?.max ?? ''}" inputmode="numeric" />
+            </div>
+          </div>
         </div>
 
         <div class="cf-macro-col">
@@ -686,6 +700,14 @@ export const UI = {
           <div class="cf-conf-toggle" data-macro="protein">
             <button type="button" class="cf-conf-btn ${confPro !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
             <button type="button" class="cf-conf-btn est ${confPro === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
+          </div>
+          <div class="cf-range-row ${confPro === 'estimated' ? '' : 'hidden'}" data-range-macro="protein">
+            <div class="cf-range-label">Range (opt)</div>
+            <div class="cf-range-inputs">
+              <input type="number" id="cf-range-min-pro" class="cf-input-range" min="0" step="0.1" placeholder="Min" value="${rangePro?.min ?? ''}" inputmode="decimal" />
+              <span class="cf-range-sep">–</span>
+              <input type="number" id="cf-range-max-pro" class="cf-input-range" min="0" step="0.1" placeholder="Max" value="${rangePro?.max ?? ''}" inputmode="decimal" />
+            </div>
           </div>
         </div>
 
@@ -696,6 +718,14 @@ export const UI = {
             <button type="button" class="cf-conf-btn ${confCarb !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
             <button type="button" class="cf-conf-btn est ${confCarb === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
           </div>
+          <div class="cf-range-row ${confCarb === 'estimated' ? '' : 'hidden'}" data-range-macro="carbs">
+            <div class="cf-range-label">Range (opt)</div>
+            <div class="cf-range-inputs">
+              <input type="number" id="cf-range-min-carb" class="cf-input-range" min="0" step="0.1" placeholder="Min" value="${rangeCarb?.min ?? ''}" inputmode="decimal" />
+              <span class="cf-range-sep">–</span>
+              <input type="number" id="cf-range-max-carb" class="cf-input-range" min="0" step="0.1" placeholder="Max" value="${rangeCarb?.max ?? ''}" inputmode="decimal" />
+            </div>
+          </div>
         </div>
 
         <div class="cf-macro-col">
@@ -704,6 +734,14 @@ export const UI = {
           <div class="cf-conf-toggle" data-macro="fat">
             <button type="button" class="cf-conf-btn ${confFat !== 'estimated' ? 'active' : ''}" data-val="known">Known</button>
             <button type="button" class="cf-conf-btn est ${confFat === 'estimated' ? 'active' : ''}" data-val="estimated">Est</button>
+          </div>
+          <div class="cf-range-row ${confFat === 'estimated' ? '' : 'hidden'}" data-range-macro="fat">
+            <div class="cf-range-label">Range (opt)</div>
+            <div class="cf-range-inputs">
+              <input type="number" id="cf-range-min-fat" class="cf-input-range" min="0" step="0.1" placeholder="Min" value="${rangeFat?.min ?? ''}" inputmode="decimal" />
+              <span class="cf-range-sep">–</span>
+              <input type="number" id="cf-range-max-fat" class="cf-input-range" min="0" step="0.1" placeholder="Max" value="${rangeFat?.max ?? ''}" inputmode="decimal" />
+            </div>
           </div>
         </div>
       </div>
@@ -718,6 +756,8 @@ export const UI = {
         </select>
       </div>
 
+      <div id="cf-form-error" class="cf-form-error-msg hidden"></div>
+
       <div class="cf-form-actions">
         <button type="button" class="btn btn-sm" id="cf-cancel-btn">Cancel</button>
         <button type="button" class="btn btn-sm btn-primary" id="cf-save-btn">${isEdit ? 'Save Changes' : 'Add Food'}</button>
@@ -730,8 +770,22 @@ export const UI = {
     wrap.querySelectorAll('.cf-conf-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const toggle = btn.parentElement;
+        const macro = toggle.dataset.macro;
         toggle.querySelectorAll('.cf-conf-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+
+        const rangeRow = wrap.querySelector(`.cf-range-row[data-range-macro="${macro}"]`);
+        if (rangeRow) {
+          if (btn.dataset.val === 'estimated') {
+            rangeRow.classList.remove('hidden');
+          } else {
+            rangeRow.classList.add('hidden');
+            const minInp = rangeRow.querySelector('input[id^="cf-range-min"]');
+            const maxInp = rangeRow.querySelector('input[id^="cf-range-max"]');
+            if (minInp) minInp.value = '';
+            if (maxInp) maxInp.value = '';
+          }
+        }
       });
     });
 
@@ -745,19 +799,6 @@ export const UI = {
       const name = (document.getElementById('cf-input-name')?.value || '').trim();
       const amount = parseFloat(document.getElementById('cf-input-amount')?.value);
       const unit = (document.getElementById('cf-input-unit')?.value || '').trim();
-
-      if (!name) {
-        document.getElementById('cf-input-name')?.focus();
-        return;
-      }
-      if (isNaN(amount) || amount <= 0) {
-        document.getElementById('cf-input-amount')?.focus();
-        return;
-      }
-      if (!unit) {
-        document.getElementById('cf-input-unit')?.focus();
-        return;
-      }
 
       const parseMacro = (id) => {
         const v = document.getElementById(id)?.value?.trim();
@@ -777,6 +818,23 @@ export const UI = {
         return active?.dataset?.val === 'estimated' ? 'estimated' : 'known';
       };
 
+      const parseRange = (macroKey, minId, maxId) => {
+        const toggle = wrap.querySelector(`.cf-conf-toggle[data-macro="${macroKey}"]`);
+        const active = toggle?.querySelector('.cf-conf-btn.active');
+        const isEst = active?.dataset?.val === 'estimated';
+        if (!isEst) return null;
+
+        const minEl = document.getElementById(minId);
+        const maxEl = document.getElementById(maxId);
+        const minStr = minEl?.value?.trim();
+        const maxStr = maxEl?.value?.trim();
+        if (!minStr && !maxStr) return null;
+
+        const min = minStr ? parseFloat(minStr) : NaN;
+        const max = maxStr ? parseFloat(maxStr) : NaN;
+        return { min, max };
+      };
+
       const mealSelect = document.getElementById('cf-select-meal');
       const meal = mealSelect?.value || null;
 
@@ -789,18 +847,48 @@ export const UI = {
         carbs: carb,
         fat,
         confidence: {
-          calories: getConf('calories'),
-          protein: getConf('protein'),
-          carbs: getConf('carbs'),
-          fat: getConf('fat')
+          calories: cal === null ? 'unknown' : getConf('calories'),
+          protein: pro === null ? 'unknown' : getConf('protein'),
+          carbs: carb === null ? 'unknown' : getConf('carbs'),
+          fat: fat === null ? 'unknown' : getConf('fat')
+        },
+        ranges: {
+          calories: parseRange('calories', 'cf-range-min-cal', 'cf-range-max-cal'),
+          protein: parseRange('protein', 'cf-range-min-pro', 'cf-range-max-pro'),
+          carbs: parseRange('carbs', 'cf-range-min-carb', 'cf-range-max-carb'),
+          fat: parseRange('fat', 'cf-range-min-fat', 'cf-range-max-fat')
         },
         meal
       };
 
+      const errBox = document.getElementById('cf-form-error');
+      const validationErrors = validateCustomFood(payload);
+      if (validationErrors.length > 0) {
+        if (errBox) {
+          errBox.textContent = validationErrors.join(' ');
+          errBox.classList.remove('hidden');
+        }
+        return;
+      }
+
       if (isEdit) {
-        updateCustomFood(editId, payload);
+        const res = updateCustomFood(editId, payload);
+        if (res.errors?.length) {
+          if (errBox) {
+            errBox.textContent = res.errors.join(' ');
+            errBox.classList.remove('hidden');
+          }
+          return;
+        }
       } else {
-        addCustomFood(payload);
+        const res = addCustomFood(payload);
+        if (res.errors?.length) {
+          if (errBox) {
+            errBox.textContent = res.errors.join(' ');
+            errBox.classList.remove('hidden');
+          }
+          return;
+        }
       }
 
       Persistence.save();

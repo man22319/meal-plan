@@ -203,6 +203,7 @@ export function generateStateFingerprint(customState = state) {
       carbs: cf.carbs,
       fat: cf.fat,
       confidence: cf.confidence,
+      ranges: cf.ranges,
       meal: cf.meal
     }))
   };
