@@ -241,13 +241,16 @@ export function formatDailySummary(result, targets = null, customFoods = []) {
 }
 
 /**
- * Formats a plain-text summary of the weight trend and nutritional trend for clipboard export.
+ * Formats a comprehensive plain-text statistical summary of weight trend and nutritional history
+ * for clipboard export. Covers ALL logged intake (no window limit) and outputs every
+ * descriptive stat: n, mean, median, SD, min, max, range, diff, % diff, plus
+ * calorie-contribution rows for each macro.
  *
  * @param {Object} [options={}]
  * @param {Object} [options.weightHistory] - Weight entries keyed by YYYY-MM-DD
  * @param {Object} [options.intakeHistory] - Intake entries keyed by YYYY-MM-DD
  * @param {Object} [options.targets] - Daily nutrient targets (calories, protein, carbs, fat)
- * @param {number} [options.windowDays=7] - Nutrition timeframe window in days (e.g. 7, 14, 30)
+ * @param {number} [options.windowDays] - Ignored — all history is used; kept for API compat
  * @param {string} [options.referenceDate] - YYYY-MM-DD reference date (defaults to today)
  * @returns {string} Formatted plain-text summary
  */
@@ -255,113 +258,201 @@ export function formatWeightAndNutritionSummary({
   weightHistory = {},
   intakeHistory = {},
   targets = null,
-  windowDays = 7,
+  windowDays,        // kept for API compatibility — ignored; we always use full history
   referenceDate = null
 } = {}) {
   const refDate = referenceDate || getLocalDateString();
-  const days = typeof windowDays === 'number' && windowDays > 0 ? windowDays : 7;
 
-  // Weight metrics
-  const curW = calculateCurrentWeight(weightHistory, refDate);
-  const avg7 = calculateMovingAverage(weightHistory, 7, refDate);
-  const avg14 = calculateMovingAverage(weightHistory, 14, refDate);
-  const trendRate = calculateWeightTrend(weightHistory, { windowDays: 14, minObservations: 3, referenceDate: refDate });
+  // ── Weight metrics ──────────────────────────────────────────────────────────
+  const curW    = calculateCurrentWeight(weightHistory, refDate);
+  const avg7    = calculateMovingAverage(weightHistory, 7,  refDate);
+  const avg14   = calculateMovingAverage(weightHistory, 14, refDate);
+  const trendRate = calculateWeightTrend(weightHistory, {
+    windowDays: 14, minObservations: 3, referenceDate: refDate
+  });
 
-  const curDisplay = curW !== null ? `${curW.toFixed(1)} lb` : '—';
-  const avg7Display = avg7 !== null ? `${avg7.toFixed(1)} lb` : '—';
-  const avg14Display = avg14 !== null ? `${avg14.toFixed(1)} lb` : '—';
+  const wFmt = (v) => (v !== null ? `${v.toFixed(1)} lb` : '—');
   let rateDisplay = '—';
   if (trendRate !== null) {
     const sign = trendRate > 0.001 ? '+' : '';
     rateDisplay = `${sign}${trendRate.toFixed(2)} lb/wk`;
   }
 
-  // Intake metrics
-  const intakeStats = calculateIntakeStats(intakeHistory, days, refDate, targets);
+  // ── Intake stats over ALL history (windowDays = null) ────────────────────────
+  const intakeStats = calculateIntakeStats(intakeHistory, null, refDate, targets);
 
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  const COL_W = 14;   // label column width
+  const pad  = (s, w = COL_W) => String(s).padEnd(w);
+  const sep  = (char = '─', len = 72) => char.repeat(len);
+
+  /** Format a numeric value; kcal rounded to integer, macros to 1 dp */
+  const fv = (v, isKcal) => {
+    if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) return '—';
+    return isKcal ? Math.round(v).toLocaleString() : Number(v).toFixed(1);
+  };
+
+  /**
+   * Build a compact stat block for one nutrient.
+   * Returns an array of lines.
+   */
+  const buildStatBlock = (label, stat, unit, isKcal = false) => {
+    if (!stat || stat.n === 0 || stat.mean === null) {
+      return [`${pad(label)}n=0  (no data)`];
+    }
+
+    const u   = unit ? ` ${unit}` : '';
+    const obs = stat.n;
+    const mn  = fv(stat.mean,   isKcal);
+    const med = fv(stat.median, isKcal);
+    const sd  = stat.sd !== null ? fv(stat.sd, isKcal) : '—';
+    const mi  = fv(stat.min,  isKcal);
+    const mx  = fv(stat.max,  isKcal);
+    const rng = (stat.min !== null && stat.max !== null)
+      ? `${mi}–${mx}${u}`
+      : '—';
+
+    let diffStr = '—';
+    let pctStr  = '—';
+    let tgtStr  = '—';
+    if (stat.target !== null && stat.difference !== null) {
+      tgtStr  = `${fv(stat.target, isKcal)}${u}`;
+      const sign = stat.difference >= 0 ? '+' : '';
+      diffStr = `${sign}${fv(stat.difference, isKcal)}${u}`;
+      pctStr  = stat.percentDifference !== null
+        ? formatPercent(stat.percentDifference, 2, true)
+        : '—';
+    }
+
+    return [
+      `${pad(label)}n=${obs}  mean=${mn}${u}  median=${med}${u}  SD=${sd}${u}`,
+      `${pad('')}min=${mi}${u}  max=${mx}${u}  range=${rng}`,
+      `${pad('')}target=${tgtStr}  diff=${diffStr}  %diff=${pctStr}`
+    ];
+  };
+
+  // ── Calorie-contribution stats ───────────────────────────────────────────────
+  /**
+   * Derive per-observation calorie-from-macro values and compute stats inline.
+   */
+  const derivedCalStats = (key, kcalPerG) => {
+    const src = intakeStats[key];
+    if (!src || src.n === 0 || src.mean === null) return null;
+
+    // Reconstruct the distribution by scaling the raw stats isn't possible without
+    // raw values, so we approximate using the available descriptive stats (mean,
+    // median, SD, min, max are linearly scaled by kcalPerG).
+    const scale = (v) => (v !== null ? v * kcalPerG : null);
+
+    const tgt  = src.target !== null ? src.target * kcalPerG : null;
+    const diff = src.difference !== null ? src.difference * kcalPerG : null;
+    const pct  = src.percentDifference;   // % doesn't change under linear scaling
+
+    return {
+      n:                src.n,
+      mean:             scale(src.mean),
+      median:           scale(src.median),
+      sd:               scale(src.sd),
+      min:              scale(src.min),
+      max:              scale(src.max),
+      target:           tgt,
+      difference:       diff,
+      percentDifference: pct
+    };
+  };
+
+  // ── Macro calorie split (based on mean intakes) ──────────────────────────────
+  const avgC = intakeStats.carbs?.mean  ?? null;
+  const avgF = intakeStats.fat?.mean    ?? null;
+  const avgP = intakeStats.protein?.mean ?? null;
+
+  let macroSplitLines = [];
+  if (avgC !== null && avgF !== null && avgP !== null) {
+    const kcalC    = avgC * 4;
+    const kcalF    = avgF * 9;
+    const kcalP    = avgP * 4;
+    const kcalTot  = kcalC + kcalF + kcalP;
+    if (kcalTot > 0) {
+      macroSplitLines = [
+        sep(),
+        'MACRO CALORIE SPLIT (based on mean intakes)',
+        sep(),
+        `${'Carbs (4 kcal/g)'.padEnd(22)}avg ${fv(kcalC, true)} kcal/day  (${formatPercent((kcalC / kcalTot) * 100, 1)})`,
+        `${'Fat (9 kcal/g)'.padEnd(22)}avg ${fv(kcalF, true)} kcal/day  (${formatPercent((kcalF / kcalTot) * 100, 1)})`,
+        `${'Protein (4 kcal/g)'.padEnd(22)}avg ${fv(kcalP, true)} kcal/day  (${formatPercent((kcalP / kcalTot) * 100, 1)})`,
+        `${'Total from macros'.padEnd(22)}avg ${fv(kcalTot, true)} kcal/day`
+      ];
+    }
+  }
+
+  // ── Assemble lines ──────────────────────────────────────────────────────────
   const lines = [
-    'WEIGHT & NUTRITIONAL TREND SUMMARY',
-    `Date: ${refDate}`,
+    'WEIGHT & NUTRITIONAL SUMMARY',
     '',
+    sep(),
     'WEIGHT TREND',
-    `Current: ${curDisplay}`,
-    `7-Day Avg: ${avg7Display}`,
-    `14-Day Avg: ${avg14Display}`,
-    `Rate: ${rateDisplay}`,
-    '',
-    `NUTRITIONAL TREND (${days}-DAY WINDOW)`
+    sep(),
+    `Current:    ${wFmt(curW)}`,
+    `7-Day Avg:  ${wFmt(avg7)}`,
+    `14-Day Avg: ${wFmt(avg14)}`,
+    `Rate:       ${rateDisplay}`,
   ];
 
   if (!intakeStats || intakeStats.distinctDays === 0) {
-    lines.push(`Logged: 0 / ${days} days`);
-    lines.push('No intake snapshots recorded in this period.');
-  } else {
-    lines.push(`Logged: ${intakeStats.distinctDays} / ${days} days`);
+    lines.push('');
+    lines.push(sep());
+    lines.push('NUTRITIONAL STATISTICS');
+    lines.push(sep());
+    lines.push('No intake snapshots recorded.');
+    return lines.join('\n');
+  }
 
-    // Calories
-    const cal = intakeStats.calories;
-    if (cal && cal.mean !== null) {
-      let calLine = `Calories: ${Math.round(cal.mean).toLocaleString()} kcal/day`;
-      if (cal.sd !== null) {
-        calLine += ` (±${Math.round(cal.sd).toLocaleString()})`;
-      }
-      if (cal.target !== null) {
-        calLine += ` | Target: ${Math.round(cal.target).toLocaleString()} kcal ${formatCalorieDeviation(cal.difference, cal.percentDifference)}`;
-      }
-      if (cal.min !== null && cal.max !== null) {
-        calLine += ` | Range: ${Math.round(cal.min).toLocaleString()}–${Math.round(cal.max).toLocaleString()}`;
-      }
-      if (cal.median !== null) {
-        calLine += ` | Med: ${Math.round(cal.median).toLocaleString()}`;
-      }
-      lines.push(calLine);
-    } else {
-      lines.push('Calories: —');
-    }
+  const totalObs = intakeStats.calories?.n ?? intakeStats.distinctDays;
+  lines.push('');
+  lines.push(sep());
+  lines.push(`NUTRITIONAL STATISTICS  (n=${totalObs} logged days, all history)`);
+  lines.push(sep());
+  lines.push('');
 
-    // Macros helper
-    const formatMacroLine = (name, stat) => {
-      if (stat && stat.mean !== null) {
-        let mLine = `${name}: ${stat.mean.toFixed(1)} g/day`;
-        if (stat.sd !== null) {
-          mLine += ` (±${stat.sd.toFixed(1)})`;
-        }
-        if (stat.target !== null) {
-          mLine += ` | Target: ${stat.target.toFixed(1)} g ${formatMacroDeviation(stat.difference, stat.percentDifference)}`;
-        }
-        if (stat.min !== null && stat.max !== null) {
-          mLine += ` | Range: ${stat.min.toFixed(1)}–${stat.max.toFixed(1)}`;
-        }
-        if (stat.median !== null) {
-          mLine += ` | Med: ${stat.median.toFixed(1)}`;
-        }
-        return mLine;
-      }
-      return `${name}: —`;
-    };
+  // Calories
+  lines.push('── CALORIES ──');
+  buildStatBlock('Calories', intakeStats.calories, 'kcal', true).forEach(l => lines.push(l));
 
-    lines.push(formatMacroLine('Carbs', intakeStats.carbs));
-    lines.push(formatMacroLine('Fat', intakeStats.fat));
-    lines.push(formatMacroLine('Protein', intakeStats.protein));
+  // Cals from carbs
+  lines.push('');
+  lines.push('── CALORIES FROM CARBS ──');
+  buildStatBlock('Cals·Carbs', derivedCalStats('carbs', 4), 'kcal', true).forEach(l => lines.push(l));
 
-    // Macro Split
-    const avgCarbs = intakeStats.carbs?.mean;
-    const avgFat = intakeStats.fat?.mean;
-    const avgProtein = intakeStats.protein?.mean;
-    if (avgCarbs !== null && avgCarbs !== undefined &&
-        avgFat !== null && avgFat !== undefined &&
-        avgProtein !== null && avgProtein !== undefined) {
-      const carbKcal = avgCarbs * 4;
-      const fatKcal = avgFat * 9;
-      const proKcal = avgProtein * 4;
-      const totalMacroKcal = carbKcal + fatKcal + proKcal;
-      if (totalMacroKcal > 0) {
-        const carbPct = formatPercent((carbKcal / totalMacroKcal) * 100, 1, false);
-        const fatPct = formatPercent((fatKcal / totalMacroKcal) * 100, 1, false);
-        const proPct = formatPercent((proKcal / totalMacroKcal) * 100, 1, false);
-        lines.push(`Macro Split: ${carbPct} C / ${fatPct} F / ${proPct} P`);
-      }
-    }
+  // Cals from fat
+  lines.push('');
+  lines.push('── CALORIES FROM FAT ──');
+  buildStatBlock('Cals·Fat', derivedCalStats('fat', 9), 'kcal', true).forEach(l => lines.push(l));
+
+  // Cals from protein
+  lines.push('');
+  lines.push('── CALORIES FROM PROTEIN ──');
+  buildStatBlock('Cals·Protein', derivedCalStats('protein', 4), 'kcal', true).forEach(l => lines.push(l));
+
+  // Carbs
+  lines.push('');
+  lines.push('── CARBOHYDRATES ──');
+  buildStatBlock('Carbs', intakeStats.carbs, 'g').forEach(l => lines.push(l));
+
+  // Fat
+  lines.push('');
+  lines.push('── FAT ──');
+  buildStatBlock('Fat', intakeStats.fat, 'g').forEach(l => lines.push(l));
+
+  // Protein
+  lines.push('');
+  lines.push('── PROTEIN ──');
+  buildStatBlock('Protein', intakeStats.protein, 'g').forEach(l => lines.push(l));
+
+  // Macro split
+  if (macroSplitLines.length > 0) {
+    lines.push('');
+    macroSplitLines.forEach(l => lines.push(l));
   }
 
   return lines.join('\n');
