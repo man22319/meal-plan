@@ -8,7 +8,9 @@ import { Persistence } from '../io/persistence.js';
 import { generateCandidates } from './candidates.js';
 import { simulateCandidates, simulateCandidatesAsync } from './simulation.js';
 import { rankRecommendations, computeSigmoidScore } from './scoring.js';
-import { getGroceryRecommendations } from './grocery.js';
+import { getGroceryRecommendations, createSolverMarginalEvaluator } from './grocery.js';
+
+export { getGroceryRecommendations, createSolverMarginalEvaluator };
 
 function formatResult(ranked, stateFingerprint, baselineSolve, candidateCount, allSimResults = [], groceryRecs = []) {
   const formattedRecommendations = ranked.map(r => {

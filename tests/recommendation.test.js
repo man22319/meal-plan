@@ -33,7 +33,7 @@ import { generateCandidates, scoreCandidateGeometry } from '../src/recommendatio
 import { simulateCandidates, simulateCandidateLPBound, cloneState, applyCandidateToState } from '../src/recommendation/simulation.js';
 import { isCandidateDominated, pruneDominatedCandidates, rankRecommendations, computeSigmoidScore } from '../src/recommendation/scoring.js';
 import { getRecommendations, applyRecommendation } from '../src/recommendation/recommendation.js';
-import { deriveNutritionalRole, scoreIngredientGroceryUtility, getGroceryRecommendations, NUTRITIONAL_ROLES } from '../src/recommendation/grocery.js';
+import { deriveNutritionalRole, scoreIngredientGroceryUtility, getGroceryRecommendations, createSolverMarginalEvaluator, NUTRITIONAL_ROLES } from '../src/recommendation/grocery.js';
 import { generateStateFingerprint } from '../src/core/state.js';
 import { solveModel } from '../src/core/solver.js';
 import { PRECISION } from '../src/core/precision.js';
@@ -634,6 +634,71 @@ export function runRecommendationTestSuite() {
 
   assert(evalHighQuality.score > evalLowQuality.score,
     `Nutritional utility dominates urgency: high-quality staple (${evalHighQuality.score}) outranks low-quality out-of-stock item (${evalLowQuality.score})`);
+
+  // Test 9.7: Candidate Pool Normalization (No faking 'out' availability)
+  const poolCandidate = { id: 'pool_item_1', name: 'Almond Butter', calories: 190, protein: 7, carbs: 6, fat: 18 };
+  const poolState = {
+    targets: targets9,
+    weights: weights9,
+    ingredients: [{ id: 'pantry_1', name: 'Oats', calories: 150, protein: 5, carbs: 27, fat: 3, availability: 'normal' }]
+  };
+  const poolRecs = getGroceryRecommendations(poolState, { candidatePool: [poolCandidate], limit: 2 });
+  const poolItemRec = poolRecs.find(r => r.ingredientName === 'Almond Butter');
+  assert(poolItemRec && poolItemRec.isPoolItem === true,
+    'Pool candidate is tagged as isPoolItem: true');
+  assert(poolItemRec && poolItemRec.source === 'candidate',
+    'Pool candidate preserves source: candidate');
+  assert(poolItemRec && poolItemRec.availability === 'candidate',
+    'Pool candidate does NOT fake "out" availability');
+
+  // Test 9.8: Dynamic Redundancy Penalty in Greedy Diversification
+  // Selecting a protein anchor (Chicken) heavily penalizes a second protein anchor (Turkey)
+  // in round 2, allowing a complementary carb/fat staple to be chosen next.
+  const similarProteinCandidates = [
+    { id: 'cand_chicken', name: 'Chicken Breast', calories: 165, protein: 31, carbs: 0, fat: 3.6, availability: 'low' },
+    { id: 'cand_turkey', name: 'Turkey Breast', calories: 160, protein: 30, carbs: 0, fat: 2.0, availability: 'low' },
+    { id: 'cand_rice', name: 'Brown Rice', calories: 215, protein: 5, carbs: 45, fat: 1.8, availability: 'low' }
+  ];
+  const diversifyState = {
+    targets: targets9,
+    weights: weights9,
+    ingredients: similarProteinCandidates
+  };
+  const diversifiedRecs = getGroceryRecommendations(diversifyState, { limit: 2 });
+  assert(diversifiedRecs.length === 2, 'Returns 2 diversified recommendations');
+  // First item will be high-utility protein anchor
+  const firstPickRole = diversifiedRecs[0].role;
+  const secondPickRole = diversifiedRecs[1].role;
+  assert(firstPickRole !== secondPickRole,
+    `Greedy selector diversifies: #1 is ${firstPickRole}, #2 is ${secondPickRole} (not duplicate protein)`);
+
+  // Test 9.9: Explicit Solver Marginal Evaluator Lifecycle & Contract
+  const testSolverState = {
+    targets: { calories: 2000, protein: 150, carbs: 200, fat: 60 },
+    meals: [{ id: 'm1', name: 'Meal 1', pct: 100 }],
+    ingredients: [
+      { id: 'ing_p', name: 'ProteinFood', calories: 120, protein: 26, carbs: 0, fat: 1, minServings: 0, maxServings: 5, availability: 'low' },
+      { id: 'ing_c', name: 'CarbFood', calories: 180, protein: 3, carbs: 42, fat: 0, minServings: 0, maxServings: 5, availability: 'limited' }
+    ]
+  };
+
+  const solverEvaluator = createSolverMarginalEvaluator({ state: testSolverState });
+  assert(typeof solverEvaluator.beginRound === 'function', 'Evaluator provides beginRound method');
+  assert(typeof solverEvaluator.evaluate === 'function', 'Evaluator provides evaluate method');
+  assert(typeof solverEvaluator.normalizeRoundEvaluations === 'function', 'Evaluator provides normalizeRoundEvaluations method');
+  assert(typeof solverEvaluator.commit === 'function', 'Evaluator provides commit method');
+
+  solverEvaluator.beginRound([]);
+  const evalResult = solverEvaluator.evaluate(testSolverState.ingredients[0]);
+  assert(typeof evalResult.status === 'string', 'Evaluator returns structured status (e.g. improves/neutral/infeasible)');
+  assert(typeof evalResult.value === 'number', 'Evaluator returns numerical value in [0, 1]');
+  assert(typeof evalResult.rawValue === 'number', 'Evaluator returns raw numerical delta');
+  assert(typeof evalResult.feasible === 'boolean', 'Evaluator returns feasible boolean');
+
+  // Test solver mode recommendation run with evaluator
+  const solverRecs = getGroceryRecommendations(testSolverState, { limit: 2, useSolver: true });
+  assert(solverRecs.length > 0, `Solver-backed recommendation produces ${solverRecs.length} items`);
+  assert(solverRecs[0].metrics?.marginalSource === 'solver', 'Metrics identify marginalSource as solver');
 
   console.log(`\nRecommendation Test Suite Results: ${passed} passed, ${failed} failed.\n`);
   return { passed, failed };

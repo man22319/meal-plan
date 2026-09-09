@@ -2308,7 +2308,7 @@ export const UI = {
       if (outcome.groceryRecommendations && outcome.groceryRecommendations.length > 0) {
         outcome.groceryRecommendations.forEach((g, i) => {
           logLines.push(`    #${i + 1} [${g.roleLabel || g.role}] ${g.ingredientName} (Score: ${g.score}/100, ${g.urgencyLabel})`);
-          logLines.push(`        Metrics: Density=${g.metrics?.macroDensity} | Flexibility=${g.metrics?.macroFlexibility} | TargetFit=${g.metrics?.targetCompatibility}`);
+          logLines.push(`        Metrics: Marginal=${g.metrics?.marginalValue ?? '-'} (${g.metrics?.marginalSource || 'heur'}) | Complement=${g.metrics?.complementarity ?? '-'} | Redundancy=${g.metrics?.macroRedundancy ?? g.metrics?.redundancy ?? '-'}`);
           if (g.reasons?.length > 0) {
             logLines.push(`        Reasons: ${g.reasons.join(' | ')}`);
           }
@@ -2450,7 +2450,7 @@ export const UI = {
 
             <div class="recommend-card-footer">
               <div class="recommend-summary-hint">
-                Density: ${(g.metrics?.macroDensity || 0).toFixed(2)} | Flexibility: ${(g.metrics?.macroFlexibility || 0).toFixed(2)} | Target Fit: ${(g.metrics?.targetCompatibility || 0).toFixed(2)}
+                Marginal: ${(g.metrics?.marginalValue ?? 0).toFixed(2)} | Complement: ${(g.metrics?.complementarity ?? 0).toFixed(2)} | Redundancy: ${(g.metrics?.macroRedundancy ?? g.metrics?.redundancy ?? 0).toFixed(2)}
               </div>
               ${canRestock ? `
                 <button type="button" class="btn btn-sm btn-apply-grocery" data-ing-id="${escAttr(g.ingredientId || '')}" data-ing-name="${escAttr(g.ingredientName)}">
