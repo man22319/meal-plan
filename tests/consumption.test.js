@@ -9,8 +9,7 @@ import {
   calculateConsumption,
   duplicateMealItem,
   distributeConsolidatedEaten,
-  getConsolidatedEaten,
-  getItemEatenQuantity
+  getConsolidatedEaten
 } from '../src/core/consumption.js';
 import { Optimization } from '../src/core/solver.js';
 import { formatDailySummary } from '../src/core/formatters.js';
@@ -763,6 +762,219 @@ export function runConsumptionTestSuite() {
     assert.ok(text.includes('Custom · Apple — 1 whole'), 'Unassigned custom food must appear in unassigned section');
 
     console.log('[CS-15] formatDailySummary Includes Custom Foods: PASSED');
+  }
+
+  // ── TEST 16: Custom Foods Default Consumption Accounting & Exact Macro Invariants ──
+  {
+    resetTestState();
+    const customFoods = [
+      {
+        id: 'cf_shake',
+        name: 'Protein Shake',
+        amount: 1,
+        unit: 'bottle',
+        calories: 200,
+        protein: 30,
+        carbs: 10,
+        fat: 4
+      }
+    ];
+
+    const agg = aggregateIngredients(null, customFoods, {}, []);
+    const res = calculateConsumption(agg, {});
+
+    assert.strictEqual(res.items.length, 1);
+    const item = res.items[0];
+    assert.strictEqual(item.plannedAmount, 1);
+    assert.strictEqual(item.eatenAmount, 1, 'Default custom food must be fully accounted as eaten');
+    assert.strictEqual(item.remainingAmount, 0, 'Remaining amount must be 0 for default custom food');
+
+    // Numerical macro assertions on eatenTotals
+    assert.strictEqual(res.eatenTotals.calories, 200, 'eatenTotals.calories must include custom food');
+    assert.strictEqual(res.eatenTotals.protein, 30, 'eatenTotals.protein must include custom food');
+    assert.strictEqual(res.eatenTotals.carbs, 10, 'eatenTotals.carbs must include custom food');
+    assert.strictEqual(res.eatenTotals.fat, 4, 'eatenTotals.fat must include custom food');
+
+    // Numerical macro assertions on remainingTotals
+    assert.strictEqual(res.remainingTotals.calories, 0, 'remainingTotals.calories must be 0 when custom food is eaten');
+    assert.strictEqual(res.remainingTotals.protein, 0, 'remainingTotals.protein must be 0 when custom food is eaten');
+    assert.strictEqual(res.remainingTotals.carbs, 0, 'remainingTotals.carbs must be 0 when custom food is eaten');
+    assert.strictEqual(res.remainingTotals.fat, 0, 'remainingTotals.fat must be 0 when custom food is eaten');
+
+    // Subcase: explicit isEaten === false
+    const uneatenCustom = [
+      {
+        id: 'cf_shake',
+        name: 'Protein Shake',
+        amount: 1,
+        unit: 'bottle',
+        calories: 200,
+        protein: 30,
+        carbs: 10,
+        fat: 4,
+        isEaten: false
+      }
+    ];
+    const aggUneaten = aggregateIngredients(null, uneatenCustom, {}, []);
+    const resUneaten = calculateConsumption(aggUneaten, {});
+    const itemUneaten = resUneaten.items[0];
+    assert.strictEqual(itemUneaten.eatenAmount, 0, 'isEaten: false custom food must have eatenAmount 0');
+    assert.strictEqual(itemUneaten.remainingAmount, 1, 'isEaten: false custom food must have remainingAmount 1');
+    assert.strictEqual(resUneaten.eatenTotals.calories, 0);
+    assert.strictEqual(resUneaten.remainingTotals.calories, 200);
+
+    console.log('[CS-16] Custom Foods Default Consumption & Exact Macro Invariants: PASSED');
+  }
+
+  // ── TEST 17: Custom Foods Partial Consumption & Precedence Matrix ──
+  {
+    resetTestState();
+    // Case 1: Partial consumption via explicit eatenQuantity
+    const partialCustom = [
+      {
+        id: 'cf_bar',
+        name: 'Protein Bar',
+        amount: 2,
+        unit: 'bars',
+        calories: 400,
+        protein: 40,
+        carbs: 30,
+        fat: 10,
+        eatenQuantity: 1
+      }
+    ];
+    const aggPartial = aggregateIngredients(null, partialCustom, {}, []);
+    const resPartial = calculateConsumption(aggPartial, {});
+    const itemPartial = resPartial.items[0];
+
+    assert.strictEqual(itemPartial.plannedAmount, 2);
+    assert.strictEqual(itemPartial.eatenAmount, 1, 'Partial custom food eaten amount must be 1');
+    assert.strictEqual(itemPartial.remainingAmount, 1, 'Partial custom food remaining amount must be 1');
+    assert.strictEqual(resPartial.eatenTotals.calories, 200, 'eatenTotals must reflect 1 bar (200 kcal)');
+    assert.strictEqual(resPartial.remainingTotals.calories, 200, 'remainingTotals must reflect remaining 1 bar (200 kcal)');
+    assert.strictEqual(resPartial.eatenTotals.protein, 20);
+    assert.strictEqual(resPartial.remainingTotals.protein, 20);
+
+    // Case 2: ateSoFar overrides cf.eatenQuantity
+    const resOverride = calculateConsumption(aggPartial, { cf_bar: 1.5 });
+    const itemOverride = resOverride.items[0];
+    assert.strictEqual(itemOverride.eatenAmount, 1.5, 'ateSoFar override must win over cf.eatenQuantity');
+    assert.strictEqual(itemOverride.remainingAmount, 0.5, 'remainingAmount must be 2 - 1.5 = 0.5');
+    assert.strictEqual(resOverride.eatenTotals.calories, 300);
+    assert.strictEqual(resOverride.remainingTotals.calories, 100);
+
+    console.log('[CS-17] Custom Foods Partial Consumption & Precedence Matrix: PASSED');
+  }
+
+  // ── TEST 18: Consolidated Consumption Table HTML Rendering for Custom Foods ──
+  {
+    resetTestState();
+    let html = '';
+    const containerEl = {
+      get innerHTML() { return html; },
+      set innerHTML(v) { html = v; },
+      classList: { add: () => {}, remove: () => {} },
+      querySelector: () => null,
+      querySelectorAll: () => []
+    };
+
+    if (typeof global.document === 'undefined') {
+      global.document = {
+        createElement: (tag) => ({ tag, textContent: '', set innerHTML(v) {}, get innerHTML() { return this.textContent; } }),
+        getElementById: () => null
+      };
+    }
+
+    const origGetById = global.document.getElementById;
+    global.document.getElementById = (id) => (id === 'consumption-container' ? containerEl : null);
+
+    state.result = {
+      mealResults: [{
+        id: 'meal_breakfast',
+        name: 'Breakfast',
+        items: []
+      }]
+    };
+    state.customFoods = [
+      {
+        id: 'cf_apple',
+        name: 'Apple',
+        amount: 1,
+        unit: 'whole',
+        calories: 95,
+        protein: 0.5,
+        carbs: 25,
+        fat: 0.3
+      }
+    ];
+    state.ateSoFar = {};
+
+    UI.renderConsumptionCard();
+
+    assert.ok(html.includes('Apple'), 'Custom food name must be present in table');
+    assert.ok(html.includes('CUSTOM'), 'Custom badge must be present');
+    assert.ok(html.includes('remaining-zero-badge'), 'Remaining 0 badge must be rendered for eaten custom food');
+    assert.ok(html.includes('0 whole'), 'Remaining 0 text must be rendered');
+    assert.ok(html.includes('is-completed'), 'Row must have is-completed class');
+
+    global.document.getElementById = origGetById;
+    console.log('[CS-18] Consolidated Consumption Table HTML Rendering: PASSED');
+  }
+
+  // ── TEST 19: Meal Cards Render Invariant (Meal COPY Removed, Summary COPY Kept) ──
+  {
+    resetTestState();
+    let cardsHtml = '';
+    const cardsEl = {
+      get innerHTML() { return cardsHtml; },
+      set innerHTML(v) { cardsHtml = v; },
+      querySelectorAll: () => []
+    };
+
+    if (typeof global.document === 'undefined') {
+      global.document = {
+        createElement: (tag) => ({ tag, textContent: '', set innerHTML(v) {}, get innerHTML() { return this.textContent; } }),
+        getElementById: () => null
+      };
+    }
+
+    const origGetById = global.document.getElementById;
+    global.document.getElementById = (id) => {
+      if (id === 'results-cards') return cardsEl;
+      if (id === 'results-section') return { classList: { remove: () => {}, add: () => {} } };
+      if (id === 'results-objective') return { textContent: '' };
+      if (id === 'results-target-calories') return { textContent: '' };
+      if (id === 'results-actual-calories') return { textContent: '' };
+      if (id === 'results-cal-diff') return { textContent: '', classList: { add: () => {}, remove: () => {} } };
+      if (id === 'consumption-container') return { classList: { add: () => {}, remove: () => {} } };
+      if (id === 'copy-summary-btn') return { addEventListener: () => {} };
+      return null;
+    };
+
+    state.result = {
+      feasible: true,
+      totals: { calories: 2000, protein: 150, carbs: 200, fat: 50 },
+      deviations: { calories: { absolute: 0, percentage: 0 }, protein: { absolute: 0, percentage: 0 }, carbs: { absolute: 0, percentage: 0 }, fat: { absolute: 0, percentage: 0 } },
+      mealResults: [{
+        id: 'meal_breakfast',
+        name: 'Breakfast',
+        pct: 40,
+        calories: 800,
+        targetCalories: 800,
+        protein: 60,
+        carbs: 80,
+        fat: 20,
+        items: []
+      }]
+    };
+
+    UI.renderResults({ scroll: false });
+
+    assert.ok(!cardsHtml.includes('btn-copy-meal'), 'Rendered meal card must NOT contain .btn-copy-meal');
+    assert.ok(!cardsHtml.includes('title="Copy this meal"'), 'Rendered meal card must NOT contain Copy this meal');
+
+    global.document.getElementById = origGetById;
+    console.log('[CS-19] Meal Cards Render Invariant: PASSED');
   }
 }
 

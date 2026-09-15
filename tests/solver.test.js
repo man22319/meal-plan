@@ -381,6 +381,80 @@ export function runSolverTestSuite() {
     );
   }
 
+  // ── TEST 13: EATEN Items Immutability, MILP Equality Constraint, and preserveActuals Semantics ──
+  {
+    resetTestState();
+    // Deterministic model with 3 canonical macro sources:
+    // Food A (pure carb/cal): 100 kcal, 0P, 25C, 0F, servingSize = 100g, maxServings = 10
+    // Food B (pure protein): 100 kcal, 25P, 0C, 0F, servingSize = 100g, maxServings = 10
+    // Food C (pure fat): 90 kcal, 0P, 0C, 10F, servingSize = 100g, maxServings = 10
+    state.meals = [{ id: 'meal_0', name: 'Meal 1', pct: 100 }];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 3 };
+    state.targets = { calories: 590, protein: 50, carbs: 75, fat: 10 };
+    state.weights = { calories: 10, protein: 10, carbs: 10, fat: 10, mealAllocation: 1 };
+    state.ingredients = [
+      { id: 'ing_carb', name: 'FoodA', servingSize: 100, unit: 'g', calories: 100, protein: 0, carbs: 25, fat: 0, minServings: 0, maxServings: 10, quantityMode: 'continuous', availability: 'normal' },
+      { id: 'ing_pro', name: 'FoodB', servingSize: 100, unit: 'g', calories: 100, protein: 25, carbs: 0, fat: 0, minServings: 0, maxServings: 10, quantityMode: 'continuous', availability: 'normal' },
+      { id: 'ing_fat', name: 'FoodC', servingSize: 100, unit: 'g', calories: 90, protein: 0, carbs: 0, fat: 10, minServings: 0, maxServings: 10, quantityMode: 'continuous', availability: 'normal' }
+    ];
+
+    // Step 1: Baseline solve
+    const baseline = Optimization.solve({ preserveActuals: false });
+    const bFoodA = baseline.result.mealResults[0].items.find(i => i.id === 'ing_carb');
+    const bFoodB = baseline.result.mealResults[0].items.find(i => i.id === 'ing_pro');
+    const bFoodC = baseline.result.mealResults[0].items.find(i => i.id === 'ing_fat');
+
+    assert('Test 13A: Baseline solved FoodA to 300g', Math.abs(bFoodA.quantity - 300) < 0.1, `Got ${bFoodA?.quantity}`);
+    assert('Test 13A: Baseline solved FoodB to 200g', Math.abs(bFoodB.quantity - 200) < 0.1, `Got ${bFoodB?.quantity}`);
+    assert('Test 13A: Baseline solved FoodC to 100g', Math.abs(bFoodC.quantity - 100) < 0.1, `Got ${bFoodC?.quantity}`);
+
+    // Step 2: Mark FoodA EATEN with quantity 100g (1 serv instead of 3 serv)
+    Optimization.markIngredientEaten('meal_0', 'ing_carb');
+    state.eatenItems['meal_0_ing_carb'] = { quantity: 100, eatenQuantity: 100, servings: 1, plannedQuantity: 300 };
+    state.ateSoFar = { ing_carb: 100 };
+
+    // Record an un-eaten actual portion on FoodB to test preserveActuals semantics:
+    Optimization.recordActual('meal_0', 'ing_pro', 150, 200);
+
+    // Step 3: Re-solve with preserveActuals = false
+    // Invariants:
+    // 1. FoodA is frozen to 100g (x_carb = 1.0)
+    // 2. FoodA remains isEaten === true
+    // 3. state.eatenItems and state.ateSoFar remain intact
+    // 4. FoodB un-eaten actual was cleared because preserveActuals: false
+    // 5. FoodB and FoodC remain free optimization variables conditioned on FoodA = 100g.
+    const resFalse = Optimization.solve({ preserveActuals: false });
+    const meal0False = resFalse.result.mealResults[0];
+    const postA = meal0False.items.find(i => i.id === 'ing_carb');
+    const postB = meal0False.items.find(i => i.id === 'ing_pro');
+
+    assert('Test 13B: EATEN FoodA quantity exactly frozen to 100g on preserveActuals: false',
+      Math.abs(postA.quantity - 100) < 0.001, `Got ${postA?.quantity}`);
+    assert('Test 13B: EATEN FoodA remains isEaten === true', postA.isEaten === true);
+    assert('Test 13B: state.eatenItems preserved across solve({ preserveActuals: false })',
+      Boolean(state.eatenItems['meal_0_ing_carb']) && state.eatenItems['meal_0_ing_carb'].quantity === 100);
+    assert('Test 13B: state.ateSoFar preserved across solve', state.ateSoFar.ing_carb === 100);
+    assert('Test 13B: Un-eaten actual on FoodB was cleared when preserveActuals is false',
+      postB.isActual === false && !state.actuals['meal_0_ing_pro']);
+
+    // Invariant 6: MILP constraint x_i = s_Actual actively enforced:
+    assert('Test 13C: Non-eaten FoodB actively optimized around frozen FoodA (conditional MILP constraint)',
+      Math.abs(postB.quantity - 200) < 1.0, `FoodB solved to ${postB?.quantity}`);
+
+    // Step 4: Test multiple eaten items frozen simultaneously and preserveActuals: true
+    Optimization.markIngredientEaten('meal_0', 'ing_pro');
+    state.eatenItems['meal_0_ing_pro'] = { quantity: 250, eatenQuantity: 250, servings: 2.5, plannedQuantity: 200 };
+
+    const resTrue = Optimization.solve({ preserveActuals: true });
+    const meal0True = resTrue.result.mealResults[0];
+    const postA2 = meal0True.items.find(i => i.id === 'ing_carb');
+    const postB2 = meal0True.items.find(i => i.id === 'ing_pro');
+
+    assert('Test 13D: Multiple eaten items remain frozen (FoodA=100g, FoodB=250g)',
+      Math.abs(postA2.quantity - 100) < 0.001 && postA2.isEaten === true &&
+      Math.abs(postB2.quantity - 250) < 0.001 && postB2.isEaten === true);
+  }
+
   console.log(`\nMacro-Calorie Solver Tests: ${failed === 0 ? 'ALL PASSED' : `${failed} FAILED`}\n`);
   if (failed > 0) {
     process.exitCode = 1;

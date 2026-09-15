@@ -697,10 +697,14 @@ export const Optimization = {
     }
 
     if (!preserveActuals) {
-      state.actuals = {};
-      // New solve = fresh consumption state
-      state.eatenItems = {};
-      state.ateSoFar = {};
+      if (state.actuals) {
+        const eatenKeys = new Set(Object.keys(state.eatenItems || {}));
+        Object.keys(state.actuals).forEach(key => {
+          if (!eatenKeys.has(key)) {
+            delete state.actuals[key];
+          }
+        });
+      }
     }
 
     state.meals.forEach((m, idx) => ensureId(m, `meal_${idx}`));

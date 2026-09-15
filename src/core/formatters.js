@@ -258,7 +258,7 @@ export function formatWeightAndNutritionSummary({
   weightHistory = {},
   intakeHistory = {},
   targets = null,
-  windowDays,        // kept for API compatibility — ignored; we always use full history
+  _windowDays,        // kept for API compatibility — ignored; we always use full history
   referenceDate = null
 } = {}) {
   const refDate = referenceDate || getLocalDateString();

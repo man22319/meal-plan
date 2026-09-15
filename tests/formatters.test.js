@@ -350,7 +350,7 @@ console.log('══════════════════════�
 
   const targets = { calories: 2000, protein: 150, carbs: 200, fat: 50 };
 
-  // 1. Full data with 7-day window
+  // 1. Full data
   const fullText = formatWeightAndNutritionSummary({
     weightHistory,
     intakeHistory,
@@ -359,18 +359,24 @@ console.log('══════════════════════�
     referenceDate: '2026-08-25'
   });
 
-  assert('Test H: Contains header and date', fullText.includes('WEIGHT & NUTRITIONAL TREND SUMMARY\nDate: 2026-08-25'));
-  assert('Test H: Formats current weight', fullText.includes('Current: 184.3 lb'));
-  assert('Test H: Formats 7-day avg weight', fullText.includes('7-Day Avg: 185.8 lb'));
+  assert('Test H: Contains header', fullText.includes('WEIGHT & NUTRITIONAL SUMMARY'));
+  assert('Test H: Formats current weight', fullText.includes('Current:    184.3 lb'));
+  assert('Test H: Formats 7-day avg weight', fullText.includes('7-Day Avg:  185.8 lb'));
   assert('Test H: Formats 14-day avg weight', fullText.includes('14-Day Avg: 185.8 lb'));
-  assert('Test H: Formats weight trend rate', fullText.includes('Rate: -'));
-  assert('Test H: Contains nutritional trend section header', fullText.includes('NUTRITIONAL TREND (7-DAY WINDOW)'));
-  assert('Test H: Formats distinct logged days', fullText.includes('Logged: 3 / 7 days'));
-  assert('Test H: Formats calories with mean, SD, and target deviation', fullText.includes('Calories: 2,100 kcal/day (±100) | Target: 2,000 kcal (+100 kcal, +5.0%)'));
-  assert('Test H: Formats carbs with mean, SD, and target deviation', fullText.includes('Carbs: 210.0 g/day (±10.0) | Target: 200.0 g (+10.0 g, +5.0%)'));
-  assert('Test H: Formats fat with mean, SD, and target deviation', fullText.includes('Fat: 55.0 g/day (±5.0) | Target: 50.0 g (+5.0 g, +10.0%)'));
-  assert('Test H: Formats protein with mean, SD, and target deviation', fullText.includes('Protein: 160.0 g/day (±10.0) | Target: 150.0 g (+10.0 g, +6.7%)'));
-  assert('Test H: Formats macro split line', fullText.includes('Macro Split: 42.5% C / 25.1% F / 32.4% P'));
+  assert('Test H: Formats weight trend rate', fullText.includes('Rate:       -3.42 lb/wk'));
+  assert('Test H: Contains nutritional statistics section header', fullText.includes('NUTRITIONAL STATISTICS  (n=3 logged days, all history)'));
+  assert('Test H: Formats calories with mean, SD, and target deviation',
+    fullText.includes('mean=2,100 kcal') && fullText.includes('SD=100 kcal') && fullText.includes('diff=+100 kcal') && fullText.includes('%diff=+5.00%'));
+  assert('Test H: Formats carbs with mean, SD, and target deviation',
+    fullText.includes('mean=210.0 g') && fullText.includes('SD=10.0 g') && fullText.includes('diff=+10.0 g') && fullText.includes('%diff=+5.00%'));
+  assert('Test H: Formats fat with mean, SD, and target deviation',
+    fullText.includes('mean=55.0 g') && fullText.includes('SD=5.0 g') && fullText.includes('diff=+5.0 g') && fullText.includes('%diff=+10.00%'));
+  assert('Test H: Formats protein with mean, SD, and target deviation',
+    fullText.includes('mean=160.0 g') && fullText.includes('SD=10.0 g') && fullText.includes('diff=+10.0 g') && fullText.includes('%diff=+6.67%'));
+  assert('Test H: Formats macro split lines',
+    fullText.includes('Carbs (4 kcal/g)') && fullText.includes('(42.5%)') &&
+    fullText.includes('Fat (9 kcal/g)') && fullText.includes('(25.1%)') &&
+    fullText.includes('Protein (4 kcal/g)') && fullText.includes('(32.4%)'));
 
   // 2. Empty data handling
   const emptyText = formatWeightAndNutritionSummary({
@@ -378,23 +384,12 @@ console.log('══════════════════════�
     intakeHistory: {},
     referenceDate: '2026-08-25'
   });
-  assert('Test H: Empty weight displays dash', emptyText.includes('Current: —') && emptyText.includes('7-Day Avg: —') && emptyText.includes('Rate: —'));
-  assert('Test H: Empty intake displays 0 logged days and notice', emptyText.includes('Logged: 0 / 7 days') && emptyText.includes('No intake snapshots recorded in this period.'));
+  assert('Test H: Empty weight displays dash', emptyText.includes('Current:    —') && emptyText.includes('7-Day Avg:  —') && emptyText.includes('Rate:       —'));
+  assert('Test H: Empty intake displays notice', emptyText.includes('No intake snapshots recorded.'));
 
-  // 3. Custom window (14-day)
-  const window14Text = formatWeightAndNutritionSummary({
-    weightHistory,
-    intakeHistory,
-    targets,
-    windowDays: 14,
-    referenceDate: '2026-08-25'
-  });
-  assert('Test H: Custom window header displays 14-DAY WINDOW', window14Text.includes('NUTRITIONAL TREND (14-DAY WINDOW)'));
-  assert('Test H: Custom window logged days displays / 14 days', window14Text.includes('Logged: 3 / 14 days'));
-
-  // 4. Default options call
+  // 3. Default options call
   const defaultText = formatWeightAndNutritionSummary();
-  assert('Test H: Calling with no arguments does not crash', typeof defaultText === 'string' && defaultText.includes('WEIGHT & NUTRITIONAL TREND SUMMARY'));
+  assert('Test H: Calling with no arguments does not crash', typeof defaultText === 'string' && defaultText.includes('WEIGHT & NUTRITIONAL SUMMARY'));
 }
 
 

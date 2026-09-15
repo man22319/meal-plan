@@ -1195,7 +1195,6 @@ export const UI = {
           <div class="result-card" data-meal-id="${escAttr(meal.id || mealIdx)}" data-meal-idx="${mealIdx}">
             <div class="result-card-header">
               <span class="result-meal-name">${esc(meal.name)}</span>
-              <button type="button" class="btn-copy-meal" data-meal-id="${escAttr(meal.id || mealIdx)}" title="Copy this meal">Copy</button>
               <span class="result-meal-pct">${meal.pct}%</span>
             </div>
             <div class="result-meal-calories">
@@ -1227,21 +1226,6 @@ export const UI = {
         `;
       }).join('');
 
-      cardsEl.querySelectorAll('.btn-copy-meal').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const mealId = btn.dataset.mealId;
-          const res = Optimization.copyMeal(mealId);
-          if (res.error) {
-            UI.showErrors([res.error]);
-            return;
-          }
-          Persistence.save();
-          UI.renderMeals();
-          UI.renderCustomFoods();
-          UI.renderResults({ scroll: false });
-        });
-      });
 
       cardsEl.querySelectorAll('.result-ingredient-row:not(.is-custom-consumed)').forEach(row => {
         bindPressAndHold(row, {

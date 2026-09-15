@@ -304,13 +304,31 @@ export function aggregateIngredients(solverResult, customFoods = [], eatenItems 
       const qty = typeof cf.amount === 'number' ? cf.amount : 1;
       group.plannedAmount += qty;
       group.totalServings += (group.servingSize > 0 ? qty / group.servingSize : 1);
+      // Resolve custom food eaten quantity with deterministic precedence:
+      // 1. Explicit eaten quantity in eatenItems state map
+      // 2. Explicit cf.eatenQuantity property on custom food object
+      // 3. Explicit cf.isEaten === false (marked uneaten -> 0)
+      // 4. Default: qty (custom foods represent fixed consumed nutrition already eaten)
+      let itemEaten = qty;
+      const mealKey = `${cf.meal || 'custom'}_${foodDefId}`;
+      const eatenFromMap = getItemEatenQuantity(cf.meal || 'custom', foodDefId, eatenItems)
+        || (eatenItems?.[mealKey]?.eatenQuantity ?? eatenItems?.[mealKey]?.quantity);
+
+      if (typeof eatenFromMap === 'number' && eatenFromMap >= 0) {
+        itemEaten = eatenFromMap;
+      } else if (typeof cf.eatenQuantity === 'number') {
+        itemEaten = cf.eatenQuantity;
+      } else if (cf.isEaten === false) {
+        itemEaten = 0;
+      }
+
       group.meals.push({
         mealId: cf.meal || null,
         mealName: cf.meal || 'Custom Food',
         amount: qty,
         servings: group.servingSize > 0 ? qty / group.servingSize : 1,
         unit: cf.unit || group.unit,
-        eatenQuantity: 0
+        eatenQuantity: itemEaten
       });
     });
   }
@@ -403,12 +421,17 @@ export function calculateConsumption(aggregatedFoods = [], ateSoFar = {}) {
   const plannedTotals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
   aggregatedFoods.forEach(food => {
-    // Eaten is derived from individual items (consolidatedEaten) or fallback to ateSoFar
-    const eaten = (typeof food.consolidatedEaten === 'number' && food.consolidatedEaten > 0)
-      ? food.consolidatedEaten
-      : (typeof ateSoFar?.[food.foodDefinitionId] === 'number'
-          ? ateSoFar[food.foodDefinitionId]
-          : (typeof food.consolidatedEaten === 'number' ? food.consolidatedEaten : 0));
+    // Precedence:
+    // 1. Explicit ateSoFar override for this food definition
+    // 2. Individual meal-item consolidated eaten derivation (food.consolidatedEaten)
+    let eaten;
+    if (typeof ateSoFar?.[food.foodDefinitionId] === 'number') {
+      eaten = ateSoFar[food.foodDefinitionId];
+    } else if (typeof food.consolidatedEaten === 'number') {
+      eaten = food.consolidatedEaten;
+    } else {
+      eaten = 0;
+    }
     const planned = Math.max(0, food.plannedAmount ?? 0);
     const remaining = Math.max(0, planned - eaten);
 
