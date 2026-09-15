@@ -1,4 +1,4 @@
-import { resolveAvailability, state, generateId, generateStateFingerprint } from '../core/state.js';
+import { resolveAvailability, state, generateIngredientId, generateStateFingerprint, ensureIngredientId, findIngredientById } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 import { Optimization } from '../core/solver.js';
 import { bindPressAndHold } from './pressHold.js';
@@ -19,6 +19,7 @@ import {
   addCustomFood,
   updateCustomFood,
   removeCustomFood,
+  createCustomFoodFromIngredient,
   aggregateCustomFoods,
   detectInfeasibleDimensions,
   resolveMeal,
@@ -37,9 +38,15 @@ const EPSILON = 0.001;
 let activeNutritionWindowDays = 7;
 
 export function esc(str) {
-  const d = document.createElement('div');
-  d.textContent = String(str);
-  return d.innerHTML;
+  if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    const d = document.createElement('div');
+    d.textContent = String(str);
+    return d.innerHTML;
+  }
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 export function escAttr(str) {
@@ -231,6 +238,10 @@ export const UI = {
       return;
     }
 
+    state.ingredients.forEach(ing => {
+      ensureIngredientId(ing, state.ingredients);
+    });
+
     container.innerHTML = state.ingredients.map((ing, i) => {
       const mode = ing.quantityMode === 'discrete' ? 'discrete' : 'continuous';
       const avail = resolveAvailability(ing.availability);
@@ -243,9 +254,12 @@ export const UI = {
             : 'Fully available';
 
       return `
-      <div class="ingredient-card" data-i="${i}">
+      <div class="ingredient-card" data-i="${i}" data-id="${escAttr(ing.id)}">
         <div class="ing-row ing-name-row">
-          <input type="text" class="ing-name-input" value="${escAttr(ing.name)}" data-i="${i}" data-f="name" placeholder="Ingredient name" />
+          <div class="ing-name-wrap">
+            <input type="text" class="ing-name-input" value="${escAttr(ing.name)}" data-i="${i}" data-f="name" placeholder="Ingredient name" />
+            <div class="ing-id-meta ing-id-badge"><span class="ing-id-label">ID:</span> <span class="ing-id-value">${esc(ing.id)}</span></div>
+          </div>
           <button type="button" class="del-btn" data-del="${i}" aria-label="Delete ingredient" title="Delete">×</button>
         </div>
 
@@ -414,7 +428,7 @@ export const UI = {
       searchInput.value = '';
     }
     state.ingredients.push({
-      id: generateId('ing'),
+      id: generateIngredientId(state.ingredients),
       name: '',
       servingSize: '',
       unit: 'g',
@@ -490,6 +504,8 @@ export const UI = {
     const totalsContainer = document.getElementById('custom-foods-totals-container');
     const addBtn = document.getElementById('add-custom-food-btn');
     const removeAllBtn = document.getElementById('remove-all-custom-foods-btn');
+
+    UI.renderMeasuredFoodSection();
 
     const hasItems = Boolean(state.customFoods && state.customFoods.length > 0);
 
@@ -912,6 +928,161 @@ export const UI = {
     }
     if (mainActions) {
       mainActions.classList.remove('hidden');
+    }
+  },
+
+  updateMeasuredFoodPreview() {
+    const idInput = document.getElementById('measured-food-id-input');
+    const amountInput = document.getElementById('measured-food-amount-input');
+    const unitSelect = document.getElementById('measured-food-unit-select');
+    const previewEl = document.getElementById('measured-food-preview');
+    const errorEl = document.getElementById('measured-food-error');
+
+    if (!idInput || !amountInput || !unitSelect || !previewEl || !errorEl) return;
+
+    const idVal = idInput.value.trim();
+    if (!idVal) {
+      previewEl.classList.add('hidden');
+      previewEl.innerHTML = '';
+      errorEl.classList.add('hidden');
+      errorEl.textContent = '';
+      return;
+    }
+
+    const ing = findIngredientById(idVal, state.ingredients);
+    if (!ing) {
+      previewEl.classList.add('hidden');
+      previewEl.innerHTML = '';
+      errorEl.classList.remove('hidden');
+      errorEl.textContent = 'That ingredient ID does not exist. Check the ID shown on the ingredient card and try again.';
+      return;
+    }
+
+    // Ingredient found
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+
+    const rawAmount = amountInput.value.trim();
+    const numAmount = rawAmount === '' ? NaN : Number(rawAmount);
+    const unitVal = unitSelect.value;
+    const ingServingSize = Number(ing.servingSize);
+
+    if (isNaN(numAmount) || numAmount <= 0) {
+      previewEl.classList.remove('hidden');
+      previewEl.innerHTML = `
+        <div class="preview-header">
+          <span class="preview-found-title">Found: ${esc(ing.name)}</span>
+          <span class="preview-serving-info">ID: ${esc(ing.id)} · Serving size: ${ingServingSize || 100} ${esc(ing.unit)}</span>
+        </div>
+      `;
+      return;
+    }
+
+    // Check unit compatibility
+    const ingUnit = (ing.unit || '').trim().toLowerCase();
+    const reqUnit = unitVal.trim().toLowerCase();
+    const isG = reqUnit === 'g' && ingUnit === 'g';
+    const isML = reqUnit === 'ml' && ingUnit === 'ml';
+
+    if (!isG && !isML) {
+      previewEl.classList.add('hidden');
+      previewEl.innerHTML = '';
+      errorEl.classList.remove('hidden');
+      errorEl.textContent = 'This ingredient does not have a valid g/mL serving definition and cannot be logged using this unit.';
+      return;
+    }
+
+    const servings = numAmount / (ingServingSize || 100);
+    const cal = (Number(ing.calories) || 0) * servings;
+    const pro = (Number(ing.protein) || 0) * servings;
+    const carb = (Number(ing.carbs) || 0) * servings;
+    const fat = (Number(ing.fat) || 0) * servings;
+
+    previewEl.classList.remove('hidden');
+    previewEl.innerHTML = `
+      <div class="preview-header">
+        <span class="preview-found-title">Found: ${esc(ing.name)}</span>
+        <span class="preview-serving-info">ID: ${esc(ing.id)} · Serving size: ${ingServingSize || 100} ${esc(ing.unit)}</span>
+      </div>
+      <div class="preview-nutrition-grid">
+        <span>Actual: <span class="p-val">${numAmount} ${esc(unitVal)}</span> (${servings.toFixed(2)} serv)</span>
+        <span class="p-sep">|</span>
+        <span>Calories: <span class="p-val">${Math.round(cal)}</span></span>
+        <span class="p-sep">|</span>
+        <span>Protein: <span class="p-val">${pro.toFixed(1)}g</span></span>
+        <span class="p-sep">|</span>
+        <span>Carbs: <span class="p-val">${carb.toFixed(1)}g</span></span>
+        <span class="p-sep">|</span>
+        <span>Fat: <span class="p-val">${fat.toFixed(1)}g</span></span>
+      </div>
+    `;
+  },
+
+  renderMeasuredFoodSection() {
+    const idInput = document.getElementById('measured-food-id-input');
+    const amountInput = document.getElementById('measured-food-amount-input');
+    const unitSelect = document.getElementById('measured-food-unit-select');
+    const addBtn = document.getElementById('add-measured-food-btn');
+    const previewEl = document.getElementById('measured-food-preview');
+    const errorEl = document.getElementById('measured-food-error');
+
+    if (!idInput || !amountInput || !unitSelect || !addBtn) return;
+
+    if (!idInput.dataset.bound) {
+      idInput.dataset.bound = 'true';
+      idInput.addEventListener('input', () => UI.updateMeasuredFoodPreview());
+    }
+
+    if (!amountInput.dataset.bound) {
+      amountInput.dataset.bound = 'true';
+      amountInput.addEventListener('input', () => UI.updateMeasuredFoodPreview());
+    }
+
+    if (!unitSelect.dataset.bound) {
+      unitSelect.dataset.bound = 'true';
+      unitSelect.addEventListener('change', () => UI.updateMeasuredFoodPreview());
+    }
+
+    if (!addBtn.dataset.bound) {
+      addBtn.dataset.bound = 'true';
+      addBtn.addEventListener('click', () => {
+        const idVal = idInput.value.trim();
+        const rawAmount = amountInput.value.trim();
+        const numAmount = rawAmount === '' ? NaN : Number(rawAmount);
+        const unitVal = unitSelect.value;
+
+        const outcome = createCustomFoodFromIngredient(idVal, numAmount, unitVal);
+        if (outcome.errors && outcome.errors.length > 0) {
+          if (errorEl) {
+            errorEl.classList.remove('hidden');
+            errorEl.textContent = outcome.errors[0];
+          }
+          if (previewEl) {
+            previewEl.classList.add('hidden');
+          }
+          return;
+        }
+
+        // Successfully created!
+        idInput.value = '';
+        amountInput.value = '';
+        if (previewEl) {
+          previewEl.classList.add('hidden');
+          previewEl.innerHTML = '';
+        }
+        if (errorEl) {
+          errorEl.classList.add('hidden');
+          errorEl.textContent = '';
+        }
+
+        Persistence.save();
+        UI.renderCustomFoods();
+        if (state.result) {
+          UI.renderResults({ scroll: false });
+        }
+        UI.renderConsumptionCard();
+        UI.markSolutionStale();
+      });
     }
   },
 
@@ -1563,6 +1734,7 @@ export const UI = {
               ${customBadge}
               ${unplannedBadge}
             </span>
+            <span class="consumption-food-id">ID: ${esc(item.foodDefinitionId)}</span>
           </td>
           <td class="col-planned">
             ${Math.round(item.plannedAmount || 0)} ${esc(item.unit)}

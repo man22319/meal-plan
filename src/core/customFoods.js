@@ -9,7 +9,7 @@
 // amount + unit are human-readable labels only — they do
 // not independently scale the nutrition values.
 
-import { state, generateId } from './state.js';
+import { state, generateId, findIngredientById } from './state.js';
 
 const MACROS = ['calories', 'protein', 'carbs', 'fat'];
 
@@ -267,7 +267,12 @@ export function addCustomFood(food) {
     fat: norm.fat ?? null,
     confidence: norm.confidence,
     ranges: norm.ranges,
-    meal: norm.meal || null
+    meal: norm.meal || null,
+    foodDefId: norm.foodDefId || norm.foodDefinitionId || null,
+    foodDefinitionId: norm.foodDefinitionId || norm.foodDefId || null,
+    servings: typeof norm.servings === 'number' ? norm.servings : null,
+    isEaten: typeof norm.isEaten === 'boolean' ? norm.isEaten : true,
+    eatenQuantity: typeof norm.eatenQuantity === 'number' ? norm.eatenQuantity : norm.amount
   };
 
   state.customFoods.push(entry);
@@ -308,6 +313,11 @@ export function updateCustomFood(id, patch) {
   existing.confidence = norm.confidence;
   existing.ranges = norm.ranges;
   existing.meal = norm.meal || null;
+  if (norm.foodDefId !== undefined) existing.foodDefId = norm.foodDefId;
+  if (norm.foodDefinitionId !== undefined) existing.foodDefinitionId = norm.foodDefinitionId;
+  if (norm.servings !== undefined) existing.servings = norm.servings;
+  if (norm.isEaten !== undefined) existing.isEaten = norm.isEaten;
+  if (norm.eatenQuantity !== undefined) existing.eatenQuantity = norm.eatenQuantity;
 
   return { entry: existing };
 }
@@ -317,6 +327,134 @@ export function removeCustomFood(id) {
   if (idx === -1) return { errors: ['Custom food not found.'] };
   const removed = state.customFoods.splice(idx, 1)[0];
   return { removed };
+}
+
+/**
+ * Logs an actual measured amount of an existing ingredient by ingredient ID.
+ *
+ * Requirements:
+ * 1. Validate foodDefId is provided and non-empty.
+ * 2. Resolve ingredient against existing definitions using exact case-insensitive match.
+ * 3. Reject nonexistent IDs without fuzzy/name matching.
+ * 4. Validate amount is numeric, finite, and > 0.
+ * 5. Restrict units to 'g' and 'mL' only.
+ * 6. Validate ingredient serving definition (positive servingSize) and unit compatibility.
+ * 7. Derive servings and nutrition linearly directly from source ingredient definition.
+ * 8. Create a custom-food entry marked isEaten: true.
+ * 9. Append to customFoods and return { entry, errors: [] }.
+ *
+ * @param {string} foodDefId - The ingredient's immutable ID
+ * @param {number} actualAmount - The measured mass or volume
+ * @param {string} unit - 'g' or 'mL'
+ * @param {Object} customState - Application state (defaults to global state)
+ * @returns {{ entry?: Object, errors?: string[] }}
+ */
+export function createCustomFoodFromIngredient(foodDefId, actualAmount, unit, customState = state) {
+  // 1. Validate ID
+  if (foodDefId === undefined || foodDefId === null || typeof foodDefId !== 'string' || foodDefId.trim() === '') {
+    return { errors: ['You need to enter an ingredient ID.'] };
+  }
+
+  const trimmedId = foodDefId.trim().toUpperCase();
+
+  // 2. Resolve ingredient against existing ingredient definitions (exact match, case-insensitive)
+  const ingredients = customState?.ingredients || state?.ingredients || [];
+  const ingredient = findIngredientById(trimmedId, ingredients);
+
+  if (!ingredient) {
+    return { errors: ['That ingredient ID does not exist. Check the ID shown on the ingredient card and try again.'] };
+  }
+
+  // 3. Validate amount
+  if (
+    actualAmount === null ||
+    actualAmount === undefined ||
+    actualAmount === '' ||
+    typeof actualAmount === 'boolean'
+  ) {
+    return { errors: ['Enter a valid amount greater than 0 g or mL.'] };
+  }
+  const numAmount = Number(actualAmount);
+  if (typeof actualAmount !== 'number' && isNaN(Number(actualAmount))) {
+    return { errors: ['Enter a valid amount greater than 0 g or mL.'] };
+  }
+  if (isNaN(numAmount) || !isFinite(numAmount) || numAmount <= 0) {
+    return { errors: ['Enter a valid amount greater than 0 g or mL.'] };
+  }
+
+  // 4. Restrict unit to g and mL
+  if (typeof unit !== 'string' || unit.trim() === '') {
+    return { errors: ['Unit must be either g or mL.'] };
+  }
+  const lowerUnit = unit.trim().toLowerCase();
+  let canonicalUnit;
+  if (lowerUnit === 'g') {
+    canonicalUnit = 'g';
+  } else if (lowerUnit === 'ml') {
+    canonicalUnit = 'mL';
+  } else {
+    return { errors: ['Unit must be either g or mL.'] };
+  }
+
+  // 5. Validate ingredient serving definition and unit compatibility
+  const ingServingSize = Number(ingredient.servingSize);
+  if (typeof ingServingSize !== 'number' || isNaN(ingServingSize) || ingServingSize <= 0) {
+    return { errors: ['This ingredient does not have a valid g/mL serving definition and cannot be logged using this unit.'] };
+  }
+
+  const ingUnit = (ingredient.unit || '').trim().toLowerCase();
+  if (canonicalUnit === 'g' && ingUnit !== 'g') {
+    return { errors: ['This ingredient does not have a valid g/mL serving definition and cannot be logged using this unit.'] };
+  }
+  if (canonicalUnit === 'mL' && ingUnit !== 'ml') {
+    return { errors: ['This ingredient does not have a valid g/mL serving definition and cannot be logged using this unit.'] };
+  }
+
+  // 6. Calculate servings and nutrition directly from source ingredient definition
+  const servings = numAmount / ingServingSize;
+  const calories = (Number(ingredient.calories) || 0) * servings;
+  const protein = (Number(ingredient.protein) || 0) * servings;
+  const carbs = (Number(ingredient.carbs) || 0) * servings;
+  const fat = (Number(ingredient.fat) || 0) * servings;
+
+  // 7. Construct custom food entry
+  const customFoodId = generateId('cf');
+  const entry = {
+    id: customFoodId,
+    name: ingredient.name,
+    foodDefId: ingredient.id,
+    foodDefinitionId: ingredient.id,
+    amount: numAmount,
+    unit: canonicalUnit,
+    servings,
+    calories,
+    protein,
+    carbs,
+    fat,
+    confidence: {
+      calories: 'known',
+      protein: 'known',
+      carbs: 'known',
+      fat: 'known'
+    },
+    ranges: {
+      calories: null,
+      protein: null,
+      carbs: null,
+      fat: null
+    },
+    meal: null,
+    isEaten: true,
+    eatenQuantity: numAmount
+  };
+
+  // 8. Add to customFoods
+  const targetFoods = customState?.customFoods || state?.customFoods;
+  if (Array.isArray(targetFoods)) {
+    targetFoods.push(entry);
+  }
+
+  return { entry, errors: [] };
 }
 
 // ── Aggregation ─────────────────────────────

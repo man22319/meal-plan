@@ -39,12 +39,14 @@ import { runIngredientSearchTestSuite } from './ingredient_search.test.js';
 import { runCustomFoodsTestSuite } from './custom_foods.test.js';
 import { runConsumptionTestSuite } from './consumption.test.js';
 import { runSolverTestSuite } from './solver.test.js';
+import { runMeasuredFoodsTestSuite } from './measured_foods.test.js';
 
 runSolverTestSuite();
 runCustomFoodsTestSuite();
 runConsumptionTestSuite();
 runRecommendationTestSuite();
 runIngredientSearchTestSuite();
+runMeasuredFoodsTestSuite();
 
 // Base nutritional target
 export const DAILY_TARGET = {

@@ -273,7 +273,7 @@ export function aggregateIngredients(solverResult, customFoods = [], eatenItems 
   // 2. Group custom foods
   if (Array.isArray(customFoods)) {
     customFoods.forEach(cf => {
-      const foodDefId = cf.foodDefinitionId || cf.id;
+      const foodDefId = cf.foodDefinitionId || cf.foodDefId || cf.id;
       if (!foodDefId) return;
 
       let group = groups.get(foodDefId);

@@ -7,7 +7,7 @@
 // deviation linearization with d+/d- auxiliary variables,
 // and immutable actual portion observation locking.
 
-import { state, ensureId, generateId, copyMeal } from './state.js';
+import { state, ensureId, generateId, copyMeal, ensureIngredientId } from './state.js';
 import { Validation } from './validation.js';
 import { PRECISION } from './precision.js';
 import { getRemainingTargets, getRemainingMealTarget, aggregateCustomFoods } from './customFoods.js';
@@ -54,10 +54,10 @@ export function resolveMealAndIngIds(mealRef, ingRef) {
   }
 
   if (typeof ingRef === 'number' && state.ingredients[ingRef]) {
-    ingId = ensureId(state.ingredients[ingRef], 'ing');
+    ingId = ensureIngredientId(state.ingredients[ingRef], state.ingredients);
   } else if (typeof ingRef === 'string') {
-    const foundIng = state.ingredients.find(i => i.id === ingRef || i.name === ingRef);
-    if (foundIng) ingId = ensureId(foundIng, 'ing');
+    const foundIng = state.ingredients.find(i => i.id === ingRef || i.name === ingRef || i.foodDefinitionId === ingRef || i.legacyId === ingRef);
+    if (foundIng) ingId = ensureIngredientId(foundIng, state.ingredients);
   }
 
   return { mealId: mealId || String(mealRef), ingId: ingId || String(ingRef) };
@@ -137,9 +137,9 @@ export function extractResults(raw, customState = state) {
   const meals = customState?.meals || state.meals;
   const actuals = customState?.actuals || state.actuals || {};
   const eatenItems = customState?.eatenItems || state.eatenItems || {};
-  const ingredients = (customState?.ingredients || state.ingredients).map((ing, idx) => ({
+  const ingredients = (customState?.ingredients || state.ingredients).map((ing) => ({
     ...ing,
-    id: ing.id || `ing_${idx}`,
+    id: ensureIngredientId(ing, customState?.ingredients || state.ingredients),
     servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
     calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : Number(ing.calories),
     protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : Number(ing.protein),
@@ -364,9 +364,9 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
   const actuals = customState.actuals || {};
   const eatenItems = customState.eatenItems || {};
 
-  const ingredients = (customState.ingredients || state.ingredients).map((ing, idx) => ({
+  const ingredients = (customState.ingredients || state.ingredients).map((ing) => ({
     ...ing,
-    id: ing.id || `ing_${idx}`,
+    id: ensureIngredientId(ing, customState.ingredients || state.ingredients),
     servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
     calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : Number(ing.calories),
     protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : Number(ing.protein),
@@ -498,6 +498,13 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
     const hasDailyCap = ing.availability in AVAILABILITY_CAPS;
     const dMacro = ing.calories - (4 * ing.protein + 4 * ing.carbs + 9 * ing.fat);
 
+    const isMeasuredEaten = customFoods.some(cf =>
+      cf.isEaten !== false && (
+        (cf.foodDefId && String(cf.foodDefId).toUpperCase() === String(ing.id).toUpperCase()) ||
+        (cf.foodDefinitionId && String(cf.foodDefinitionId).toUpperCase() === String(ing.id).toUpperCase())
+      )
+    );
+
     meals.forEach((meal, j) => {
       const v_x = `x_${i}_${j}`;
       const v_z = `z_${i}_${j}`;
@@ -551,8 +558,8 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
         }
 
         model.variables[v_x] = xEntry;
-      } else if (ing.availability === 'out') {
-        // Unrecorded item for an OUT ingredient cannot be allocated going forward
+      } else if (ing.availability === 'out' || isMeasuredEaten) {
+        // Unrecorded item for an OUT ingredient or already-consumed measured ingredient cannot receive additional planned allocations
         const fixBnd = `fix_${i}_${j}`;
         model.constraints[fixBnd] = { equal: 0 };
         model.variables[v_x] = { cost: 0, [fixBnd]: 1 };
@@ -708,7 +715,7 @@ export const Optimization = {
     }
 
     state.meals.forEach((m, idx) => ensureId(m, `meal_${idx}`));
-    state.ingredients.forEach((ing, idx) => ensureId(ing, `ing_${idx}`));
+    state.ingredients.forEach((ing) => ensureIngredientId(ing, state.ingredients));
 
     const outcome = solveModel(state, { validate: false });
     if (!outcome.feasible || outcome.errors?.length > 0) {

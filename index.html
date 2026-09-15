@@ -112,6 +112,38 @@
         </div>
       </section>
 
+      <!-- 4b. LOG MEASURED INGREDIENT -->
+      <section class="section" id="measured-food-section">
+        <div class="section-header">
+          <span>Log Measured Ingredient</span>
+        </div>
+        <div class="card measured-food-card">
+          <div class="measured-food-inputs">
+            <div class="field-group">
+              <label for="measured-food-id-input">Ingredient ID</label>
+              <input type="text" id="measured-food-id-input" placeholder="e.g. 7F9K" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="field-group">
+              <label for="measured-food-amount-input">Amount</label>
+              <div class="amount-unit-row">
+                <input type="number" id="measured-food-amount-input" min="0" step="any" placeholder="34" inputmode="decimal" />
+                <select id="measured-food-unit-select" class="unit-select">
+                  <option value="g" selected>g</option>
+                  <option value="mL">mL</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div id="measured-food-preview" class="measured-food-preview hidden"></div>
+          <div id="measured-food-error" class="measured-food-error hidden"></div>
+
+          <div class="measured-food-actions">
+            <button type="button" class="btn btn-primary" id="add-measured-food-btn">Add Measured Food</button>
+          </div>
+        </div>
+      </section>
+
       <!-- 5. SOLVE -->
       <div class="solve-row">
         <button class="btn btn-primary" id="solve-btn">SOLVE</button>

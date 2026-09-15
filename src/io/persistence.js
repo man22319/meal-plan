@@ -5,6 +5,7 @@
 import {
   state,
   ensureId,
+  ensureIngredientId,
   resolveAvailability,
   AVAILABILITY_STATES,
   STORAGE_KEY,
@@ -56,12 +57,12 @@ export const Persistence = {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const validated = parsed.map((ing, idx) => {
+          const validated = parsed.map((ing) => {
             if (!ing || typeof ing.name !== 'string' || ing.name.trim() === '') return null;
             if (typeof ing.unit !== 'string' || ing.unit.trim() === '') return null;
 
             return {
-              id: (typeof ing.id === 'string' && ing.id.trim() !== '') ? ing.id.trim() : ensureId(ing, `ing_${idx}`),
+              id: ensureIngredientId(ing, parsed),
               name: ing.name.trim(),
               servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? '' : (typeof ing.servingSize === 'number' && ing.servingSize > 0 ? ing.servingSize : 100),
               unit: ing.unit.trim(),
@@ -287,8 +288,8 @@ export const ImportExport = {
           if (onError) onError(errors);
           return;
         }
-        state.ingredients = parsed.ingredients.map((ing, idx) => ({
-          id: (typeof ing.id === 'string' && ing.id.trim() !== '') ? ing.id.trim() : ensureId(ing, `ing_${idx}`),
+        state.ingredients = parsed.ingredients.map((ing) => ({
+          id: ensureIngredientId(ing, parsed.ingredients),
           name: ing.name.trim(),
           servingSize: ing.servingSize,
           unit: ing.unit.trim(),

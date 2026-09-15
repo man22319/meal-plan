@@ -539,3 +539,211 @@
   color: #ff6b6b;
 }
 
+/* ══════════════════════════════════════════
+   LOG MEASURED INGREDIENT & ID BADGES
+   ══════════════════════════════════════════ */
+
+.ing-name-row {
+  align-items: flex-start !important;
+}
+
+.ing-name-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ing-name-wrap .ing-name-input {
+  width: 100%;
+}
+
+.ing-id-meta,
+.ing-id-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  background: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 0 0 2px !important;
+  margin: 0 !important;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--muted, #6c7885);
+  user-select: all;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+}
+
+.ing-id-meta .ing-id-label,
+.ing-id-badge .ing-id-label {
+  color: var(--muted, #6c7885);
+  font-weight: 400;
+  margin-right: 2px;
+}
+
+.ing-id-meta .ing-id-value,
+.ing-id-badge .ing-id-value {
+  color: var(--silver, #9ca3af);
+  font-weight: 500;
+}
+
+.result-ingredient-id,
+.consumption-food-id {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted, #6c7885);
+  margin-left: 6px;
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+
+.measured-food-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.measured-food-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 540px) {
+  .measured-food-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
+.measured-food-inputs .field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.measured-food-inputs label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--silver, #b0b8c0);
+}
+
+.measured-food-inputs input[type="text"],
+.measured-food-inputs input[type="number"] {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88rem;
+  padding: 7px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  color: var(--white, #f0f4f8);
+  transition: border-color 0.15s ease;
+}
+
+.measured-food-inputs input:focus {
+  border-color: var(--accent, #3b82f6);
+  outline: none;
+}
+
+.amount-unit-row {
+  display: flex;
+  gap: 6px;
+}
+
+.amount-unit-row input[type="number"] {
+  flex: 1;
+}
+
+.amount-unit-row select.unit-select {
+  width: 72px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  color: var(--white, #f0f4f8);
+  padding: 0 6px;
+}
+
+.measured-food-preview {
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.15s ease;
+}
+
+.measured-food-preview.hidden {
+  display: none;
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preview-found-title {
+  font-family: 'Barlow', sans-serif;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--white, #f0f4f8);
+}
+
+.preview-serving-info {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--silver, #b0b8c0);
+}
+
+.preview-nutrition-grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--white, #f0f4f8);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.preview-nutrition-grid span.p-val {
+  font-weight: 600;
+}
+
+.preview-nutrition-grid span.p-sep {
+  color: var(--muted, #6c7885);
+}
+
+.measured-food-error {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.82rem;
+  color: #fca5a5;
+  animation: fadeIn 0.15s ease;
+}
+
+.measured-food-error.hidden {
+  display: none;
+}
+
+.measured-food-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+
