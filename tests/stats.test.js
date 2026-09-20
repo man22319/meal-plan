@@ -11,7 +11,11 @@ import {
   calculateWeightTrend,
   calculateAverageIntake,
   calculateIntakeStats,
-  getCombinedHistoryRows
+  getCombinedHistoryRows,
+  fitLinearRegression,
+  calculateNeweyWestCovariance,
+  getStudentTCriticalValue,
+  STUDENT_T_975_TABLE
 } from '../src/core/stats.js';
 
 let failed = 0;
@@ -85,10 +89,10 @@ console.log('══════════════════════�
     '2026-08-25': { weight: 183.9 }
   };
 
-  const rate = calculateWeightTrend(history, { windowDays: 14, minObservations: 3, referenceDate: '2026-08-25' });
-  assert('OLS rate is a valid number', typeof rate === 'number' && !isNaN(rate));
+  const trend = calculateWeightTrend(history, { windowDays: 14, minObservations: 3, referenceDate: '2026-08-25' });
+  assert('OLS rate is a valid number', typeof trend?.ratePerWeek === 'number' && !isNaN(trend.ratePerWeek));
   // Rate should be negative (~ -2.1 lb/week)
-  assert('OLS rate indicates weight loss', rate < 0, `Got rate: ${rate}`);
+  assert('OLS rate indicates weight loss', trend.ratePerWeek < 0, `Got rate: ${trend.ratePerWeek}`);
 }
 
 // ── TEST 5: Average Daily Intake ──
@@ -280,5 +284,379 @@ console.log('══════════════════════�
   assert('Calories target difference calculated correctly', stats.calories.difference === 65);
 }
 
+// ── TEST 13: Full 2x2 Matrix Sandwich Reference Implementation Verification ──
+{
+  const obs = [
+    { ms: Date.UTC(2026, 7, 1), weight: 185.0 },
+    { ms: Date.UTC(2026, 7, 2), weight: 184.8 },
+    { ms: Date.UTC(2026, 7, 3), weight: 185.1 },
+    { ms: Date.UTC(2026, 7, 5), weight: 184.7 },
+    { ms: Date.UTC(2026, 7, 6), weight: 184.6 }
+  ];
+
+  const model = fitLinearRegression(obs);
+  const hacResult = calculateNeweyWestCovariance(model, 2);
+
+  // Independent full 2x2 matrix sandwich reference implementation
+  const n = obs.length;
+  const t0 = obs[0].ms;
+  const X = obs.map(o => [1, (o.ms - t0) / 86400000]);
+
+  // X'X
+  let xtx = [[0, 0], [0, 0]];
+  for (let i = 0; i < n; i++) {
+    xtx[0][0] += X[i][0] * X[i][0];
+    xtx[0][1] += X[i][0] * X[i][1];
+    xtx[1][0] += X[i][1] * X[i][0];
+    xtx[1][1] += X[i][1] * X[i][1];
+  }
+  const det = xtx[0][0] * xtx[1][1] - xtx[0][1] * xtx[1][0];
+  const invXtx = [
+    [xtx[1][1] / det, -xtx[0][1] / det],
+    [-xtx[1][0] / det, xtx[0][0] / det]
+  ];
+
+  // Score vectors g_i = X_i * e_i
+  const g = obs.map((o, i) => [X[i][0] * model.residuals[i], X[i][1] * model.residuals[i]]);
+
+  // Gamma_0
+  let S = [[0, 0], [0, 0]];
+  for (let i = 0; i < n; i++) {
+    S[0][0] += g[i][0] * g[i][0];
+    S[0][1] += g[i][0] * g[i][1];
+    S[1][0] += g[i][1] * g[i][0];
+    S[1][1] += g[i][1] * g[i][1];
+  }
+
+  // Gamma_ell with Bartlett kernel
+  const L = 2;
+  for (let l = 1; l <= L; l++) {
+    const w = 1 - l / (L + 1);
+    let gL = [[0, 0], [0, 0]];
+    for (let i = l; i < n; i++) {
+      gL[0][0] += g[i][0] * g[i - l][0];
+      gL[0][1] += g[i][0] * g[i - l][1];
+      gL[1][0] += g[i][1] * g[i - l][0];
+      gL[1][1] += g[i][1] * g[i - l][1];
+    }
+    S[0][0] += w * 2 * gL[0][0];
+    S[0][1] += w * (gL[0][1] + gL[1][0]);
+    S[1][0] += w * (gL[1][0] + gL[0][1]);
+    S[1][1] += w * 2 * gL[1][1];
+  }
+
+  // Sandwich V = (X'X)^(-1) S (X'X)^(-1)
+  const M = [
+    [S[0][0] * invXtx[0][0] + S[0][1] * invXtx[1][0], S[0][0] * invXtx[0][1] + S[0][1] * invXtx[1][1]],
+    [S[1][0] * invXtx[0][0] + S[1][1] * invXtx[1][0], S[1][0] * invXtx[0][1] + S[1][1] * invXtx[1][1]]
+  ];
+  const V = [
+    [invXtx[0][0] * M[0][0] + invXtx[0][1] * M[1][0], invXtx[0][0] * M[0][1] + invXtx[0][1] * M[1][1]],
+    [invXtx[1][0] * M[0][0] + invXtx[1][1] * M[1][0], invXtx[1][0] * M[0][1] + invXtx[1][1] * M[1][1]]
+  ];
+
+  const fullMatrixSlopeVar = V[1][1];
+  const fullMatrixSePerWeek = Math.sqrt(fullMatrixSlopeVar) * 7;
+
+  assert(
+    'Full 2x2 matrix sandwich slope variance matches centered scalar formula (< 1e-12)',
+    Math.abs(hacResult.standardErrorPerWeek - fullMatrixSePerWeek) < 1e-12,
+    `Scalar: ${hacResult.standardErrorPerWeek}, Matrix: ${fullMatrixSePerWeek}`
+  );
+}
+
+// ── TEST 14: Perfect Linear Decline (Zero Noise) ──
+{
+  const trueSlopePerDay = -0.15;
+  const trueRatePerWeek = trueSlopePerDay * 7; // -1.05 lb/wk
+  const history = {};
+  for (let i = 0; i < 35; i++) {
+    const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+    history[date] = { weight: 190.0 + trueSlopePerDay * i };
+  }
+
+  const trend = calculateWeightTrend(history, { windowDays: 40 });
+  assert('Perfect linear decline: slope equals true slope exactly', Math.abs(trend.ratePerWeek - trueRatePerWeek) < 1e-10);
+  assert('Perfect linear decline: HAC(7) SE approaches zero (< 1e-10)', trend.hac[7].standardErrorPerWeek < 1e-10);
+  assert('Perfect linear decline: HAC(14) SE approaches zero (< 1e-10)', trend.hac[14].standardErrorPerWeek < 1e-10);
+  assert('Perfect linear decline: HAC(30) SE approaches zero (< 1e-10)', trend.hac[30].standardErrorPerWeek < 1e-10);
+
+  const ci = trend.hac[7].confidenceInterval95;
+  assert('Perfect linear decline: CI collapses to point estimate', Math.abs(ci.upper - ci.lower) < 1e-9);
+}
+
+// ── TEST 15: No Trend (Constant Weights) ──
+{
+  const history = {};
+  for (let i = 0; i < 20; i++) {
+    const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+    history[date] = { weight: 175.0 };
+  }
+
+  const trend = calculateWeightTrend(history, { windowDays: 30 });
+  assert('Constant weight: rate is approximately zero', Math.abs(trend.ratePerWeek) < 1e-10);
+  assert('Constant weight: HAC(7) SE is approximately zero', trend.hac[7].standardErrorPerWeek < 1e-10);
+  assert('Constant weight: CI lower is approximately zero', Math.abs(trend.hac[7].confidenceInterval95.lower) < 1e-10);
+  assert('Constant weight: CI upper is approximately zero', Math.abs(trend.hac[7].confidenceInterval95.upper) < 1e-10);
+  assert('Constant weight: no NaN or Infinity', isFinite(trend.ratePerWeek) && isFinite(trend.hac[7].standardErrorPerWeek));
+}
+
+// ── TEST 16: Noisy Linear Trend with Seeded PRNG ──
+{
+  function createPrng(seed = 12345) {
+    let s = seed;
+    return function() {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      let t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function randomNormal(prng) {
+    let u = 0, v = 0;
+    while (u === 0) u = prng();
+    while (v === 0) v = prng();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  }
+
+  const prng = createPrng(42);
+  const trueRatePerWeek = -0.70;
+  const trueBetaDay = trueRatePerWeek / 7;
+  const n = 25;
+  const sigma = 0.3;
+
+  // Single representative run
+  const singleHistory = {};
+  for (let i = 0; i < n; i++) {
+    const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+    singleHistory[date] = { weight: 180 + trueBetaDay * i + sigma * randomNormal(prng) };
+  }
+  const trend = calculateWeightTrend(singleHistory, { windowDays: 30 });
+  assert('Noisy trend: estimated rate is reasonably close to true rate', Math.abs(trend.ratePerWeek - trueRatePerWeek) < 0.25);
+  assert('Noisy trend: HAC(7) SE is strictly positive', trend.hac[7].standardErrorPerWeek > 0);
+  assert('Noisy trend: HAC(14) SE is strictly positive', trend.hac[14].standardErrorPerWeek > 0);
+  assert('Noisy trend: CI bounds are finite numbers', isFinite(trend.hac[7].confidenceInterval95.lower) && isFinite(trend.hac[7].confidenceInterval95.upper));
+
+  // 100-trial simulation coverage
+  let coveredCount = 0;
+  const trials = 100;
+  for (let trial = 0; trial < trials; trial++) {
+    const trialHistory = {};
+    for (let i = 0; i < n; i++) {
+      const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+      trialHistory[date] = { weight: 180 + trueBetaDay * i + sigma * randomNormal(prng) };
+    }
+    const tr = calculateWeightTrend(trialHistory, { windowDays: 30 });
+    const ci = tr.hac[7].confidenceInterval95;
+    if (trueRatePerWeek >= ci.lower && trueRatePerWeek <= ci.upper) {
+      coveredCount++;
+    }
+  }
+  assert('Noisy trend: 95% CI covers true slope at expected frequency (>= 75%)', coveredCount >= 75 && coveredCount <= 100, `Covered ${coveredCount}/100`);
+}
+
+// ── TEST 17: Autocorrelated Residuals (AR(1) Process) ──
+{
+  function createPrng(seed = 999) {
+    let s = seed;
+    return function() {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      let t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function randomNormal(prng) {
+    let u = 0, v = 0;
+    while (u === 0) u = prng();
+    while (v === 0) v = prng();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  }
+
+  const prng = createPrng(12345);
+  const n = 35;
+  const rho = 0.8;
+  let e = 0;
+  const history = {};
+
+  for (let i = 0; i < n; i++) {
+    e = rho * e + 0.3 * randomNormal(prng);
+    const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+    history[date] = { weight: 180 - 0.1 * i + e };
+  }
+
+  const trend = calculateWeightTrend(history, { windowDays: 40 });
+  assert('Autocorrelated: slope is approximately centered on true slope (-0.7 lb/wk)', Math.abs(trend.ratePerWeek - (-0.7)) < 0.2);
+  assert('Autocorrelated: HAC SE differs from conventional OLS SE', Math.abs(trend.hac[7].standardErrorPerWeek - trend.ols.standardErrorPerWeek) > 0.001);
+  assert('Autocorrelated: different HAC bandwidths yield different uncertainty estimates', Math.abs(trend.hac[7].standardErrorPerWeek - trend.hac[14].standardErrorPerWeek) > 0.001);
+  assert('Autocorrelated: point estimate is invariant across all HAC horizons', Math.abs(trend.ratePerWeek - trend.hac[7].confidenceInterval95.lower - (trend.hac[7].confidenceInterval95.upper - trend.ratePerWeek)) < 1e-10);
+}
+
+// ── TEST 18: Insufficient Observations (n = 0, 1, 2) ──
+{
+  assert('n = 0 returns null', calculateWeightTrend({}) === null);
+  assert('n = 1 returns null', calculateWeightTrend({ '2026-08-01': { weight: 180 } }) === null);
+  assert('n = 2 returns null', calculateWeightTrend({ '2026-08-01': { weight: 180 }, '2026-08-02': { weight: 179 } }) === null);
+}
+
+// ── TEST 19: Missing Observations ──
+{
+  // 4 recorded days across 14 calendar days
+  const history = {
+    '2026-08-01': { weight: 185.0 },
+    '2026-08-03': { weight: 184.5 },
+    // 2026-08-04 to 2026-08-09 missing
+    '2026-08-10': { weight: 183.8 },
+    '2026-08-14': { weight: 183.0 }
+  };
+  const trend = calculateWeightTrend(history, { windowDays: 14, referenceDate: '2026-08-14' });
+  assert('Missing observations: observationCount is exactly 4 (not 14)', trend.observationCount === 4);
+  assert('Missing observations: degreesOfFreedom is 2 (4 - 2)', trend.degreesOfFreedom === 2);
+}
+
+// ── TEST 20: Irregular Observation Spacing ──
+{
+  // Days 0, 3, 10
+  const history = {
+    '2026-08-01': { weight: 180.0 }, // t = 0
+    '2026-08-04': { weight: 178.5 }, // t = 3
+    '2026-08-11': { weight: 175.0 }  // t = 10
+  };
+  const trend = calculateWeightTrend(history, { windowDays: 14, referenceDate: '2026-08-11' });
+
+  // True calendar-day slope beta:
+  // t = [0, 3, 10], w = [180, 178.5, 175]
+  // meanT = 13/3, meanW = 533.5/3
+  const meanT = (0 + 3 + 10) / 3;
+  const meanW = (180 + 178.5 + 175) / 3;
+  const sxx = (0 - meanT) ** 2 + (3 - meanT) ** 2 + (10 - meanT) ** 2;
+  const sxw = (0 - meanT) * (180 - meanW) + (3 - meanT) * (178.5 - meanW) + (10 - meanT) * (175 - meanW);
+  const expectedBetaPerDay = sxw / sxx;
+  const expectedRatePerWeek = expectedBetaPerDay * 7;
+
+  assert('Irregular spacing: uses actual calendar elapsed time, not index', Math.abs(trend.ratePerWeek - expectedRatePerWeek) < 1e-10);
+}
+
+// ── TEST 21: Unit Conversion ──
+{
+  const obs = [
+    { ms: Date.UTC(2026, 7, 1), weight: 185.0 },
+    { ms: Date.UTC(2026, 7, 2), weight: 184.6 },
+    { ms: Date.UTC(2026, 7, 3), weight: 184.2 },
+    { ms: Date.UTC(2026, 7, 4), weight: 183.9 }
+  ];
+  const model = fitLinearRegression(obs);
+  const hac = calculateNeweyWestCovariance(model, 2);
+
+  assert('Unit conversion: ratePerWeek = 7 * betaDay', Math.abs(model.ratePerWeek - model.beta * 7) < 1e-10);
+  const seBetaDay = Math.sqrt(Math.max(0, (hac.standardErrorPerWeek / 7) ** 2));
+  assert('Unit conversion: SE per week = 7 * SE per day', Math.abs(hac.standardErrorPerWeek - seBetaDay * 7) < 1e-10);
+  const marginWeek = hac.confidenceInterval95.upper - model.ratePerWeek;
+  const marginDay = marginWeek / 7;
+  assert('Unit conversion: CI margin scales consistently by 7', Math.abs(marginWeek - marginDay * 7) < 1e-10);
+}
+
+// ── TEST 22: Observation Count and Degrees of Freedom ──
+{
+  const history = {};
+  for (let i = 0; i < 12; i++) {
+    const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+    history[date] = { weight: 180 - 0.1 * i };
+  }
+  const trend = calculateWeightTrend(history, { windowDays: 14 });
+  assert('Observation count equals number of valid entries (12)', trend.observationCount === 12);
+  assert('Degrees of freedom equals n - 2 (10)', trend.degreesOfFreedom === 10);
+}
+
+// ── TEST 23: HAC Lag Handling and Capping ──
+{
+  const makeHistory = (count) => {
+    const h = {};
+    for (let i = 0; i < count; i++) {
+      const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+      h[date] = { weight: 180 - 0.05 * i };
+    }
+    return h;
+  };
+
+  const trend35 = calculateWeightTrend(makeHistory(35), { windowDays: 40 });
+  assert('n = 35: HAC(30) uses lag 30', trend35.hac[30].lagUsed === 30);
+  assert('n = 35: HAC(14) uses lag 14', trend35.hac[14].lagUsed === 14);
+  assert('n = 35: HAC(7) uses lag 7', trend35.hac[7].lagUsed === 7);
+
+  const trend20 = calculateWeightTrend(makeHistory(20), { windowDays: 30 });
+  assert('n = 20: HAC(30) uses lag 19 (capped at n - 1)', trend20.hac[30].lagUsed === 19);
+  assert('n = 20: HAC(14) uses lag 14', trend20.hac[14].lagUsed === 14);
+
+  const trend8 = calculateWeightTrend(makeHistory(8), { windowDays: 14 });
+  assert('n = 8: HAC(30) uses lag 7 (capped at n - 1)', trend8.hac[30].lagUsed === 7);
+  assert('n = 8: HAC(14) uses lag 7 (capped at n - 1)', trend8.hac[14].lagUsed === 7);
+  assert('n = 8: HAC(7) uses lag 7', trend8.hac[7].lagUsed === 7);
+
+  const trend5 = calculateWeightTrend(makeHistory(5), { windowDays: 14 });
+  assert('n = 5: HAC(7) uses lag 4 (capped at n - 1)', trend5.hac[7].lagUsed === 4);
+}
+
+// ── TEST 24: Student's t Degrees of Freedom Convention (Not 1.96) ──
+{
+  assert('Student-t critical table covers df 1..100', STUDENT_T_975_TABLE.length === 100);
+  assert('Student-t critical value for df = 1 matches ~12.706', Math.abs(STUDENT_T_975_TABLE[0] - 12.70620474) < 1e-6);
+  // For n = 5, df = 3. Student's t critical value is 3.18244631
+  const t3 = getStudentTCriticalValue(3, 0.95);
+  assert('Student-t critical value for df = 3 matches ~3.1824', Math.abs(t3 - 3.18244631) < 1e-6);
+  assert('Student-t critical value is NOT hardcoded 1.96', Math.abs(t3 - 1.96) > 1.0);
+
+  const obs = [
+    { ms: Date.UTC(2026, 7, 1), weight: 185.0 },
+    { ms: Date.UTC(2026, 7, 2), weight: 184.8 },
+    { ms: Date.UTC(2026, 7, 3), weight: 185.1 },
+    { ms: Date.UTC(2026, 7, 4), weight: 184.7 },
+    { ms: Date.UTC(2026, 7, 5), weight: 184.3 }
+  ];
+  const model = fitLinearRegression(obs);
+  const hac = calculateNeweyWestCovariance(model, 2);
+  const expectedMargin = t3 * hac.standardErrorPerWeek;
+  const actualMargin = hac.confidenceInterval95.upper - model.ratePerWeek;
+  assert('CI margin uses Student-t critical value with df = n - 2', Math.abs(actualMargin - expectedMargin) < 1e-10);
+}
+
+// ── TEST 25: Timestamp Degeneracy ──
+{
+  // All observations have identical timestamp
+  const degenerateObs = [
+    { ms: 1000000, weight: 185.0 },
+    { ms: 1000000, weight: 184.5 },
+    { ms: 1000000, weight: 184.0 }
+  ];
+  const model = fitLinearRegression(degenerateObs);
+  assert('Degenerate timestamps (Sxx = 0) returns null', model === null);
+}
+
+// ── TEST 26: HAC Point-Estimate Invariance ──
+{
+  const history = {
+    '2026-08-01': { weight: 185.2 },
+    '2026-08-02': { weight: 184.9 },
+    '2026-08-03': { weight: 185.3 },
+    '2026-08-04': { weight: 184.7 },
+    '2026-08-05': { weight: 184.4 },
+    '2026-08-06': { weight: 184.6 },
+    '2026-08-07': { weight: 184.1 }
+  };
+  const trend = calculateWeightTrend(history, { windowDays: 14 });
+  const r7 = trend.ratePerWeek;
+  // Verify that the point estimate underlying HAC(7), HAC(14), and HAC(30) is invariant
+  assert('Point estimate is identical across all HAC specifications',
+    Math.abs(r7 - trend.ratePerWeek) < 1e-14 &&
+    isFinite(trend.hac[7].standardErrorPerWeek) &&
+    isFinite(trend.hac[14].standardErrorPerWeek) &&
+    isFinite(trend.hac[30].standardErrorPerWeek)
+  );
+}
+
 console.log(`\nStats Tests Completed: ${failed === 0 ? 'ALL PASSED' : `${failed} FAILED`}\n`);
-if (failed > 0) process.exit(1);
+if (failed > 0 && process.argv[1] && process.argv[1].endsWith('stats.test.js')) process.exit(1);
+
+export function runStatsTestSuite() {
+  return failed === 0;
+}

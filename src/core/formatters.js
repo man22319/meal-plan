@@ -7,7 +7,9 @@ import {
   calculateMovingAverage,
   calculateWeightTrend,
   calculateIntakeStats,
-  getLocalDateString
+  getLocalDateString,
+  getWeightObservations,
+  getCombinedHistoryRows
 } from './stats.js';
 
 /**
@@ -267,9 +269,10 @@ export function formatWeightAndNutritionSummary({
   const curW    = calculateCurrentWeight(weightHistory, refDate);
   const avg7    = calculateMovingAverage(weightHistory, 7,  refDate);
   const avg14   = calculateMovingAverage(weightHistory, 14, refDate);
-  const trendRate = calculateWeightTrend(weightHistory, {
+  const trend = calculateWeightTrend(weightHistory, {
     windowDays: 14, minObservations: 3, referenceDate: refDate
   });
+  const trendRate = trend ? trend.ratePerWeek : null;
 
   const wFmt = (v) => (v !== null ? `${v.toFixed(1)} lb` : '—');
   let rateDisplay = '—';
@@ -399,6 +402,25 @@ export function formatWeightAndNutritionSummary({
     `Rate:       ${rateDisplay}`,
   ];
 
+  if (trend !== null) {
+    const fmtSign = (v) => {
+      const s = Math.abs(v) < 0.0001 ? 0 : v;
+      return `${s > 0.001 ? '+' : ''}${s.toFixed(2)}`;
+    };
+    const fmtHacLine = (name, h) => {
+      const capStr = h.lagUsed < h.requestedLag ? ` (lag ${h.lagUsed} capped)` : ` (lag ${h.lagUsed})`;
+      return `  ${name}:  SE: ${h.standardErrorPerWeek.toFixed(2)} lb/wk | 95% CI: [${fmtSign(h.confidenceInterval95.lower)} to ${fmtSign(h.confidenceInterval95.upper)}] lb/wk${capStr}`;
+    };
+
+    lines.push(`Observations: n = ${trend.observationCount} (df = ${trend.degreesOfFreedom})`);
+    lines.push('');
+    lines.push('Newey-West Uncertainty (95% CI):');
+    lines.push(fmtHacLine('HAC(7) ', trend.hac[7]));
+    lines.push(fmtHacLine('HAC(14)', trend.hac[14]));
+    lines.push(fmtHacLine('HAC(30)', trend.hac[30]));
+    lines.push('* Observation-index lags. Scale-weight trend estimate; does not directly measure fat-mass change.');
+  }
+
   if (!intakeStats || intakeStats.distinctDays === 0) {
     lines.push('');
     lines.push(sep());
@@ -453,6 +475,79 @@ export function formatWeightAndNutritionSummary({
   if (macroSplitLines.length > 0) {
     lines.push('');
     macroSplitLines.forEach(l => lines.push(l));
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Formats a plain-text summary of current weight trend statistics and
+ * tab-separated longitudinal history for clipboard export.
+ */
+export function formatWeightTrendAndHistorySummary({
+  weightHistory = {},
+  intakeHistory = {},
+  referenceDate = null,
+  windowDays = 14
+} = {}) {
+  const refDate = referenceDate || getLocalDateString();
+  const trend = calculateWeightTrend(weightHistory, {
+    windowDays,
+    minObservations: 3,
+    referenceDate: refDate
+  });
+
+  const lines = [
+    'WEIGHT TREND',
+    ''
+  ];
+
+  const formatSigned = (v) => {
+    if (typeof v !== 'number' || isNaN(v)) return '—';
+    const s = Math.abs(v) < 0.0001 ? 0 : v;
+    const sign = s < 0 ? '−' : s > 0 ? '+' : '';
+    return `${sign}${Math.abs(s).toFixed(2)}`;
+  };
+
+  if (trend !== null) {
+    lines.push(`Estimated rate: ${formatSigned(trend.ratePerWeek)} lb/week`);
+    lines.push('Newey-West SE:');
+    lines.push(`HAC(7): ${trend.hac[7].standardErrorPerWeek.toFixed(2)} lb/week`);
+    lines.push(`HAC(14): ${trend.hac[14].standardErrorPerWeek.toFixed(2)} lb/week`);
+    lines.push(`HAC(30): ${trend.hac[30].standardErrorPerWeek.toFixed(2)} lb/week`);
+    lines.push('');
+    lines.push('95% CI:');
+    lines.push(`HAC(7): ${formatSigned(trend.hac[7].confidenceInterval95.lower)} to ${formatSigned(trend.hac[7].confidenceInterval95.upper)} lb/week`);
+    lines.push(`HAC(14): ${formatSigned(trend.hac[14].confidenceInterval95.lower)} to ${formatSigned(trend.hac[14].confidenceInterval95.upper)} lb/week`);
+    lines.push(`HAC(30): ${formatSigned(trend.hac[30].confidenceInterval95.lower)} to ${formatSigned(trend.hac[30].confidenceInterval95.upper)} lb/week`);
+    lines.push('');
+    lines.push(`Observations: n = ${trend.observationCount}`);
+    lines.push(`Degrees of freedom: ${trend.degreesOfFreedom}`);
+  } else {
+    const validObs = getWeightObservations(weightHistory, windowDays, refDate);
+    lines.push('Estimated rate: unavailable');
+    lines.push('Reason: insufficient weight observations');
+    lines.push(`Observations: n = ${validObs.length}`);
+    lines.push('Minimum required: 3');
+  }
+
+  lines.push('');
+  lines.push('LONGITUDINAL HISTORY');
+
+  const rows = getCombinedHistoryRows(weightHistory, intakeHistory);
+  lines.push(`${rows.length} ${rows.length === 1 ? 'DAY' : 'DAYS'}`);
+  lines.push(['DATE', 'WEIGHT (LB)', 'KCAL', 'PROTEIN', 'CARBS', 'FAT'].join('\t'));
+
+  for (const r of rows) {
+    const parts = r.date.split('-');
+    const displayDate = parts.length === 3 ? `${parts[1]}/${parts[2]}/${parts[0].slice(2)}` : r.date;
+    const wStr = r.hasWeight ? `${r.weight.toFixed(1)}` : '—';
+    const calStr = r.hasIntake && typeof r.calories === 'number' ? `${Math.round(r.calories)}` : '—';
+    const proStr = r.hasIntake && typeof r.protein === 'number' ? `${r.protein.toFixed(1)}g` : '—';
+    const carbStr = r.hasIntake && typeof r.carbs === 'number' ? `${r.carbs.toFixed(1)}g` : '—';
+    const fatStr = r.hasIntake && typeof r.fat === 'number' ? `${r.fat.toFixed(1)}g` : '—';
+
+    lines.push([displayDate, wStr, calStr, proStr, carbStr, fatStr].join('\t'));
   }
 
   return lines.join('\n');

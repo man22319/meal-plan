@@ -817,6 +817,153 @@
   font-weight: 400;
 }
 
+/* ── NEWEY-WEST HAC UNCERTAINTY CARD ── */
+.weight-hac-card {
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hac-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.hac-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.hac-meta-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.hac-meta-sep {
+  color: var(--dim);
+  margin: 0 3px;
+}
+
+.hac-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hac-table-header {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.4fr;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--dim);
+  text-transform: uppercase;
+  padding: 0 4px 4px 4px;
+}
+
+.hac-table-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.4fr;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.hac-col-horizon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hac-horizon-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--white);
+  letter-spacing: 0.5px;
+}
+
+.hac-lag-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--dim);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.hac-lag-tag.tag-capped {
+  color: #f2a65a;
+  border: 1px solid rgba(242, 166, 90, 0.2);
+}
+
+.hac-col-se {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
+}
+
+.hac-col-ci {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
+}
+
+.hac-footnote {
+  font-size: 0.72rem;
+  color: var(--dim);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.hac-empty-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+}
+
+.hac-empty-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.hac-empty-desc {
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
 /* ── NUTRITIONAL TREND SUMMARY (HERO LAYOUT) ── */
 .nutrition-window-selector {
   display: flex;

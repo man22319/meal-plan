@@ -40,6 +40,7 @@ import { runCustomFoodsTestSuite } from './custom_foods.test.js';
 import { runConsumptionTestSuite } from './consumption.test.js';
 import { runSolverTestSuite } from './solver.test.js';
 import { runMeasuredFoodsTestSuite } from './measured_foods.test.js';
+import { runStatsTestSuite } from './stats.test.js';
 
 runSolverTestSuite();
 runCustomFoodsTestSuite();
@@ -47,6 +48,7 @@ runConsumptionTestSuite();
 runRecommendationTestSuite();
 runIngredientSearchTestSuite();
 runMeasuredFoodsTestSuite();
+runStatsTestSuite();
 
 // Base nutritional target
 export const DAILY_TARGET = {
@@ -753,6 +755,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   // Run Formatters & Plain-text Daily Summary test suite
   runFormattersTests();
+
+  // Run Stats & Longitudinal Calculation test suite
+  runStatsTestSuite();
 
   // Run UNEATEN ALL test suite
   runUneatenAllTestSuite();

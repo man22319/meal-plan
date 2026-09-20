@@ -5,6 +5,7 @@
 import {
   formatDailySummary,
   formatWeightAndNutritionSummary,
+  formatWeightTrendAndHistorySummary,
   formatPercent,
   formatCalorieDeviation,
   formatMacroDeviation
@@ -390,6 +391,69 @@ console.log('══════════════════════�
   // 3. Default options call
   const defaultText = formatWeightAndNutritionSummary();
   assert('Test H: Calling with no arguments does not crash', typeof defaultText === 'string' && defaultText.includes('WEIGHT & NUTRITIONAL SUMMARY'));
+}
+
+// ── TEST I: Copy Weight Trend & Tab-Separated Longitudinal History ──
+{
+  const weightHistory = {
+    '2026-08-20': { weight: 187.0 },
+    '2026-08-21': { weight: 186.5 },
+    '2026-08-23': { weight: 185.8 },
+    '2026-08-24': { weight: 185.4 },
+    '2026-08-25': { weight: 184.3 }
+  };
+
+  const intakeHistory = {
+    '2026-08-23': {
+      totals: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    },
+    '2026-08-24': {
+      totals: { calories: 2100, protein: 160, carbs: 210, fat: 55 }
+    },
+    '2026-08-25': {
+      totals: { calories: 2200, protein: 170, carbs: 220, fat: 60 }
+    }
+  };
+
+  // 1. Full data export
+  const trendText = formatWeightTrendAndHistorySummary({
+    weightHistory,
+    intakeHistory,
+    referenceDate: '2026-08-25',
+    windowDays: 14
+  });
+
+  assert('Test I: Starts with WEIGHT TREND section', trendText.includes('WEIGHT TREND'));
+  assert('Test I: Formats estimated rate', trendText.includes('Estimated rate: −3.42 lb/week'));
+  assert('Test I: Includes Newey-West SE header', trendText.includes('Newey-West SE:'));
+  assert('Test I: Formats HAC(7) SE', trendText.includes('HAC(7): 0.24 lb/week'));
+  assert('Test I: Formats HAC(14) SE', trendText.includes('HAC(14): 0.24 lb/week'));
+  assert('Test I: Formats HAC(30) SE', trendText.includes('HAC(30): 0.24 lb/week'));
+  assert('Test I: Includes 95% CI header', trendText.includes('95% CI:'));
+  assert('Test I: Formats HAC(7) CI', trendText.includes('HAC(7): −4.20 to −2.64 lb/week'));
+  assert('Test I: Includes observation count', trendText.includes('Observations: n = 5'));
+  assert('Test I: Includes degrees of freedom', trendText.includes('Degrees of freedom: 3'));
+  assert('Test I: Includes LONGITUDINAL HISTORY section', trendText.includes('LONGITUDINAL HISTORY\n5 DAYS'));
+  assert('Test I: Includes tab-separated table header', trendText.includes('DATE\tWEIGHT (LB)\tKCAL\tPROTEIN\tCARBS\tFAT'));
+  assert('Test I: Formats full row with tab separation', trendText.includes('08/25/26\t184.3\t2200\t170.0g\t220.0g\t60.0g'));
+  assert('Test I: Formats missing intake row with dashes', trendText.includes('08/20/26\t187.0\t—\t—\t—\t—'));
+
+  // 2. Insufficient data (< 3 observations)
+  const insufficientText = formatWeightTrendAndHistorySummary({
+    weightHistory: {
+      '2026-08-24': { weight: 185.0 },
+      '2026-08-25': { weight: 184.3 }
+    },
+    intakeHistory: {},
+    referenceDate: '2026-08-25'
+  });
+
+  assert('Test I: Insufficient data shows unavailable rate', insufficientText.includes('Estimated rate: unavailable'));
+  assert('Test I: Insufficient data gives reason', insufficientText.includes('Reason: insufficient weight observations'));
+  assert('Test I: Insufficient data shows observations count n = 2', insufficientText.includes('Observations: n = 2'));
+  assert('Test I: Insufficient data shows minimum required: 3', insufficientText.includes('Minimum required: 3'));
+  assert('Test I: Insufficient data still includes longitudinal history table', insufficientText.includes('LONGITUDINAL HISTORY\n2 DAYS'));
+  assert('Test I: Insufficient data contains no NaN or undefined', !insufficientText.includes('NaN') && !insufficientText.includes('undefined'));
 }
 
 

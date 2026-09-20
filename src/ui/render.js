@@ -8,6 +8,7 @@ import {
   calculateCurrentWeight,
   calculateMovingAverage,
   calculateWeightTrend,
+  getWeightObservations,
   calculateIntakeStats,
   getCombinedHistoryRows
 } from '../core/stats.js';
@@ -1990,7 +1991,8 @@ export const UI = {
     const curW = calculateCurrentWeight(state.weightHistory, today);
     const avg7 = calculateMovingAverage(state.weightHistory, 7, today);
     const avg14 = calculateMovingAverage(state.weightHistory, 14, today);
-    const trendRate = calculateWeightTrend(state.weightHistory, { windowDays: 14, minObservations: 3, referenceDate: today });
+    const trend = calculateWeightTrend(state.weightHistory, { windowDays: 14, minObservations: 3, referenceDate: today });
+    const trendRate = trend ? trend.ratePerWeek : null;
 
     const statsGrid = document.getElementById('weight-stats-grid');
     if (statsGrid) {
@@ -2024,6 +2026,80 @@ export const UI = {
           <div class="stat-value ${rateClass}">${rateDisplay}</div>
         </div>
       `;
+    }
+
+    // Newey-West HAC Uncertainty Card
+    const hacCard = document.getElementById('weight-hac-card');
+    if (hacCard) {
+      if (trend !== null) {
+        const formatSigned = (v) => {
+          if (typeof v !== 'number' || isNaN(v)) return '—';
+          const s = Math.abs(v) < 0.0001 ? 0 : v;
+          const sign = s > 0.001 ? '+' : '';
+          return `${sign}${s.toFixed(2)}`;
+        };
+
+        const formatCi = (ci) => {
+          if (!ci) return '—';
+          return `${formatSigned(ci.lower)} to ${formatSigned(ci.upper)}`;
+        };
+
+        const getLagTagHtml = (hacItem) => {
+          const isCapped = hacItem.lagUsed < hacItem.requestedLag;
+          const tagText = isCapped ? `lag ${hacItem.lagUsed} (capped)` : `lag ${hacItem.lagUsed}`;
+          const tagClass = isCapped ? 'hac-lag-tag tag-capped' : 'hac-lag-tag';
+          return `<span class="${tagClass}">${tagText}</span>`;
+        };
+
+        hacCard.innerHTML = `
+          <div class="hac-card-header">
+            <div class="hac-title">NEWEY-WEST HAC UNCERTAINTY</div>
+            <div class="hac-meta-badge">n = ${trend.observationCount} <span class="hac-meta-sep">•</span> df = ${trend.degreesOfFreedom}</div>
+          </div>
+          <div class="hac-table">
+            <div class="hac-table-header">
+              <div class="hac-col-horizon">Horizon</div>
+              <div class="hac-col-se">Newey-West SE</div>
+              <div class="hac-col-ci">95% CI</div>
+            </div>
+            <div class="hac-table-row">
+              <div class="hac-col-horizon">
+                <span class="hac-horizon-name">HAC(7)</span>
+                ${getLagTagHtml(trend.hac[7])}
+              </div>
+              <div class="hac-col-se">${trend.hac[7].standardErrorPerWeek.toFixed(2)} <span class="stat-unit">lb/wk</span></div>
+              <div class="hac-col-ci">${formatCi(trend.hac[7].confidenceInterval95)} <span class="stat-unit">lb/wk</span></div>
+            </div>
+            <div class="hac-table-row">
+              <div class="hac-col-horizon">
+                <span class="hac-horizon-name">HAC(14)</span>
+                ${getLagTagHtml(trend.hac[14])}
+              </div>
+              <div class="hac-col-se">${trend.hac[14].standardErrorPerWeek.toFixed(2)} <span class="stat-unit">lb/wk</span></div>
+              <div class="hac-col-ci">${formatCi(trend.hac[14].confidenceInterval95)} <span class="stat-unit">lb/wk</span></div>
+            </div>
+            <div class="hac-table-row">
+              <div class="hac-col-horizon">
+                <span class="hac-horizon-name">HAC(30)</span>
+                ${getLagTagHtml(trend.hac[30])}
+              </div>
+              <div class="hac-col-se">${trend.hac[30].standardErrorPerWeek.toFixed(2)} <span class="stat-unit">lb/wk</span></div>
+              <div class="hac-col-ci">${formatCi(trend.hac[30].confidenceInterval95)} <span class="stat-unit">lb/wk</span></div>
+            </div>
+          </div>
+          <div class="hac-footnote">
+            Observation-index lags. Evaluates scale-weight trajectory across consecutive weigh-ins; does not directly measure fat-mass change.
+          </div>
+        `;
+      } else {
+        const obsInWindow = getWeightObservations(state.weightHistory, 14, today);
+        hacCard.innerHTML = `
+          <div class="hac-empty-notice">
+            <span class="hac-empty-title">NEWEY-WEST UNCERTAINTY UNAVAILABLE</span>
+            <span class="hac-empty-desc">${obsInWindow.length} observation${obsInWindow.length === 1 ? '' : 's'} recorded. Minimum 3 observations required for linear regression and HAC uncertainty.</span>
+          </div>
+        `;
+      }
     }
 
     // ── NUTRITIONAL TREND SUMMARY (HERO LAYOUT) ──

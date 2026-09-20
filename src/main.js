@@ -4,7 +4,7 @@
 
 import { state, generateId } from './core/state.js';
 import { Optimization } from './core/solver.js';
-import { formatDailySummary, formatWeightAndNutritionSummary } from './core/formatters.js';
+import { formatDailySummary, formatWeightTrendAndHistorySummary } from './core/formatters.js';
 import { Persistence, ImportExport } from './io/persistence.js';
 import { UI } from './ui/render.js';
 import { recordWeightEntry } from './core/history.js';
@@ -34,29 +34,31 @@ function setupEventListeners() {
     }
   });
 
-  // Copy weight & nutritional trend summary
-  const copyWeightBtn = document.getElementById('copy-weight-summary-btn');
+  // Copy weight trend & longitudinal history summary
+  const copyWeightBtn = document.getElementById('copy-weight-trend-btn') || document.getElementById('copy-weight-summary-btn');
   copyWeightBtn?.addEventListener('click', async () => {
-    const activeDays = UI.getActiveNutritionWindowDays ? UI.getActiveNutritionWindowDays() : 7;
-    const summary = formatWeightAndNutritionSummary({
+    const summary = formatWeightTrendAndHistorySummary({
       weightHistory: state.weightHistory,
       intakeHistory: state.intakeHistory,
-      targets: state.targets,
-      windowDays: activeDays,
-      referenceDate: getLocalDateString()
+      referenceDate: getLocalDateString(),
+      windowDays: 14
     });
+
+    const markCopied = () => {
+      const originalText = copyWeightBtn.textContent;
+      copyWeightBtn.textContent = 'Copied';
+      setTimeout(() => {
+        copyWeightBtn.textContent = originalText;
+      }, 1500);
+    };
 
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
         await navigator.clipboard.writeText(summary);
+        markCopied();
       } else {
         throw new Error('Clipboard API unavailable');
       }
-      const originalText = copyWeightBtn.textContent;
-      copyWeightBtn.textContent = 'COPIED';
-      setTimeout(() => {
-        copyWeightBtn.textContent = originalText;
-      }, 1500);
     } catch {
       // Fallback attempt with textarea
       try {
@@ -70,11 +72,7 @@ function setupEventListeners() {
         const successful = document.execCommand('copy');
         document.body.removeChild(textArea);
         if (successful) {
-          const originalText = copyWeightBtn.textContent;
-          copyWeightBtn.textContent = 'COPIED';
-          setTimeout(() => {
-            copyWeightBtn.textContent = originalText;
-          }, 1500);
+          markCopied();
           return;
         }
       } catch {
