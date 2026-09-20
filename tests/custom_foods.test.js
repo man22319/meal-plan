@@ -17,7 +17,8 @@ import {
   normalizeCustomFood,
   validateCustomFood,
   getPlanningValue,
-  getRecordedValue
+  getRecordedValue,
+  recordPartialConsumption
 } from '../src/core/customFoods.js';
 import { solveModel } from '../src/core/solver.js';
 import { createIntakeSnapshot, recordIntakeSnapshot } from '../src/core/history.js';
@@ -944,6 +945,164 @@ export function runCustomFoodsTestSuite() {
   assert.strictEqual(sep2.calories, 2200);
 
   console.log('[CF-26] Schema Hygiene, Persistence & Longitudinal Stats Integration: PASSED');
+}
+
+// ── TEST 27: Range-Only Nutrition and Arithmetic Midpoint ──
+{
+  resetTestState();
+
+  // 1. Array range format [200, 300] with calories: null
+  addCustomFood({
+    name: 'Range Food Array',
+    amount: 1,
+    unit: 'item',
+    calories: null,
+    protein: 20,
+    carbs: 30,
+    fat: 10,
+    ranges: { calories: [200, 300] }
+  });
+  const cfArray = state.customFoods[0];
+  assert.strictEqual(getPlanningValue('calories', cfArray), 250, 'Array range [200, 300] resolves arithmetic midpoint 250');
+  assert.strictEqual(getRecordedValue('calories', cfArray), null, 'Recorded value remains null');
+  assert.deepStrictEqual(cfArray.ranges.calories, { min: 200, max: 300 }, 'Range preserved in metadata as { min, max }');
+
+  // 2. Object format { min: 200, max: 300 }
+  resetTestState();
+  addCustomFood({
+    name: 'Range Food MinMax',
+    amount: 1,
+    unit: 'item',
+    calories: null,
+    protein: 20,
+    carbs: 30,
+    fat: 10,
+    ranges: { calories: { min: 200, max: 300 } }
+  });
+  const cfMinMax = state.customFoods[0];
+  assert.strictEqual(getPlanningValue('calories', cfMinMax), 250, '{ min, max } resolves midpoint 250');
+
+  // 3. Object format { lower: 200, upper: 300 }
+  resetTestState();
+  addCustomFood({
+    name: 'Range Food LowerUpper',
+    amount: 1,
+    unit: 'item',
+    calories: null,
+    protein: 20,
+    carbs: 30,
+    fat: 10,
+    ranges: { calories: { lower: 200, upper: 300 } }
+  });
+  const cfLowerUpper = state.customFoods[0];
+  assert.strictEqual(getPlanningValue('calories', cfLowerUpper), 250, '{ lower, upper } resolves midpoint 250');
+
+  // 4. Equal bounds [150, 150]
+  resetTestState();
+  addCustomFood({
+    name: 'Equal Bounds',
+    amount: 1,
+    unit: 'item',
+    calories: null,
+    ranges: { calories: [150, 150] }
+  });
+  assert.strictEqual(getPlanningValue('calories', state.customFoods[0]), 150, 'Equal bounds [150, 150] resolves 150');
+
+  // 5. Explicit value precedence: explicit value 280, range [200, 300]
+  resetTestState();
+  addCustomFood({
+    name: 'Explicit With Range',
+    amount: 1,
+    unit: 'item',
+    calories: 280,
+    ranges: { calories: [200, 300] }
+  });
+  const cfExplicit = state.customFoods[0];
+  // Since confidence was not set to 'estimated', explicit value defaults to known/explicit
+  assert.strictEqual(cfExplicit.calories, 280, 'Explicit value preserved');
+  assert.deepStrictEqual(cfExplicit.ranges.calories, { min: 200, max: 300 }, 'Uncertainty range preserved');
+
+  // 6. Validation rejects reversed and negative bounds
+  const revErr = validateCustomFood({
+    name: 'Reversed',
+    amount: 1,
+    unit: 'g',
+    calories: null,
+    ranges: { calories: [300, 200] }
+  });
+  assert.ok(revErr.some(e => e.includes('cannot be greater than max')), 'Reversed bounds rejected');
+
+  const negErr = validateCustomFood({
+    name: 'Negative',
+    amount: 1,
+    unit: 'g',
+    calories: null,
+    ranges: { calories: [-10, 200] }
+  });
+  assert.ok(negErr.some(e => e.includes('must be a non-negative number')), 'Negative bounds rejected');
+
+  // 7. Aggregation with planning values does NOT flag hasUnknown for range-derived foods
+  resetTestState();
+  addCustomFood({
+    name: 'Range Meal Food',
+    amount: 1,
+    unit: 'serving',
+    calories: null,
+    ranges: { calories: [400, 600] }
+  });
+  const aggPlanning = aggregateCustomFoods(null, state.customFoods, { usePlanning: true });
+  assert.strictEqual(aggPlanning.calories.total, 500, 'Planning aggregation uses midpoint 500');
+  assert.strictEqual(aggPlanning.calories.hasUnknown, false, 'Range-only food does not trigger hasUnknown in planning');
+
+  console.log('[CF-27] Range-Only Nutrition and Arithmetic Midpoint: PASSED');
+}
+
+// ── TEST 28: Custom Food Partial Consumption Cumulative Accounting ──
+{
+  resetTestState();
+  addCustomFood({
+    name: 'Test Bar',
+    amount: 100,
+    unit: 'g',
+    calories: 400,
+    protein: 20,
+    carbs: 50,
+    fat: 10
+  });
+
+  const cf = state.customFoods[0];
+  assert.strictEqual(cf.amountLogged, 100, 'amountLogged starts at 100');
+  assert.strictEqual(cf.amountEaten, 100, 'amountEaten starts at 100');
+  assert.strictEqual(cf.amountRemaining, 0, 'amountRemaining starts at 0');
+
+  // 1. Partial update: 40 g eaten
+  const resPart = recordPartialConsumption(cf.id, 40, state);
+  assert.strictEqual(resPart.errors.length, 0);
+  assert.strictEqual(cf.amountLogged, 100);
+  assert.strictEqual(cf.amountEaten, 40);
+  assert.strictEqual(cf.amountRemaining, 60);
+  assert.strictEqual(cf.isEaten, false);
+
+  // 2. Cumulative update: 70 g eaten (cumulative, replaces 40 g, NOT 110 g)
+  const resUpdate = recordPartialConsumption(cf.id, 70, state);
+  assert.strictEqual(resUpdate.errors.length, 0);
+  assert.strictEqual(cf.amountLogged, 100);
+  assert.strictEqual(cf.amountEaten, 70);
+  assert.strictEqual(cf.amountRemaining, 30);
+  assert.strictEqual(cf.isEaten, false);
+
+  // 3. Repeated update: Setting 70 g again is idempotent
+  recordPartialConsumption(cf.id, 70, state);
+  assert.strictEqual(cf.amountEaten, 70);
+  assert.strictEqual(cf.amountRemaining, 30);
+
+  // 4. Complete consumption: 100 g eaten
+  recordPartialConsumption(cf.id, 100, state);
+  assert.strictEqual(cf.amountEaten, 100);
+  assert.strictEqual(cf.amountRemaining, 0);
+  assert.strictEqual(cf.isEaten, true);
+
+  console.log('[CF-28] Custom Food Partial Consumption Cumulative Accounting: PASSED');
 }
 
   // Reset state back to defaults so other test suites are clean

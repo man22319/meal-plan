@@ -15,7 +15,9 @@ import {
   fitLinearRegression,
   calculateNeweyWestCovariance,
   getStudentTCriticalValue,
-  STUDENT_T_975_TABLE
+  STUDENT_T_975_TABLE,
+  getAlignedComparisonWindows,
+  calculateNutritionalTrendComparison
 } from '../src/core/stats.js';
 
 let failed = 0;
@@ -652,6 +654,78 @@ console.log('══════════════════════�
     isFinite(trend.hac[14].standardErrorPerWeek) &&
     isFinite(trend.hac[30].standardErrorPerWeek)
   );
+}
+
+// ── TEST 27: Aligned Comparison Windows (7, 14, 28, 91 Days) ──
+{
+  [7, 14, 28, 91].forEach(W => {
+    const windows = getAlignedComparisonWindows('2026-09-20', W);
+    assert(`Window W=${W}: calendarDays is exactly ${W}`, windows.calendarDays === W);
+
+    const curStartMs = parseDateToMs(windows.currentStart);
+    const curEndMs = parseDateToMs(windows.currentEnd);
+    const prevStartMs = parseDateToMs(windows.previousStart);
+    const prevEndMs = parseDateToMs(windows.previousEnd);
+    const dayMs = 86400000;
+
+    const curSpanDays = Math.round((curEndMs - curStartMs) / dayMs) + 1;
+    const prevSpanDays = Math.round((prevEndMs - prevStartMs) / dayMs) + 1;
+
+    assert(`Window W=${W}: current window span is exactly ${W} calendar days`, curSpanDays === W);
+    assert(`Window W=${W}: previous window span is exactly ${W} calendar days`, prevSpanDays === W);
+
+    // Weekday alignment: (day of week) of currentStart must equal (day of week) of previousStart
+    const curStartDay = new Date(curStartMs).getUTCDay();
+    const prevStartDay = new Date(prevStartMs).getUTCDay();
+    const curEndDay = new Date(curEndMs).getUTCDay();
+    const prevEndDay = new Date(prevEndMs).getUTCDay();
+
+    assert(`Window W=${W}: start dates have identical weekday boundary`, curStartDay === prevStartDay);
+    assert(`Window W=${W}: end dates have identical weekday boundary`, curEndDay === prevEndDay);
+    assert(`Window W=${W}: previousEnd is immediately contiguous before currentStart`, (curStartMs - prevEndMs) === dayMs);
+  });
+}
+
+// ── TEST 28: Nutritional Trend Comparison Invariance with Missing Observations ──
+{
+  const refDate = '2026-09-20';
+  // Create 7-day window with 4 observations in current, 5 observations in previous
+  const intakeHistory = {
+    // Current window: 2026-09-14 to 2026-09-20 (7 days)
+    '2026-09-14': { calories: 2000, protein: 150, carbs: 200, fat: 50 },
+    '2026-09-16': { calories: 2100, protein: 160, carbs: 210, fat: 55 },
+    '2026-09-18': { calories: 1900, protein: 140, carbs: 190, fat: 48 },
+    '2026-09-20': { calories: 2200, protein: 170, carbs: 220, fat: 60 },
+    // Previous window: 2026-09-07 to 2026-09-13 (7 days)
+    '2026-09-07': { calories: 1800, protein: 130, carbs: 180, fat: 45 },
+    '2026-09-09': { calories: 1850, protein: 135, carbs: 185, fat: 46 },
+    '2026-09-10': { calories: 1900, protein: 140, carbs: 190, fat: 48 },
+    '2026-09-11': { calories: 1950, protein: 145, carbs: 195, fat: 50 },
+    '2026-09-13': { calories: 2000, protein: 150, carbs: 200, fat: 52 }
+  };
+
+  const trend = calculateNutritionalTrendComparison(intakeHistory, { windowDays: 7, referenceDate: refDate });
+
+  assert('Trend calendarDays is 7', trend.calendarDays === 7);
+  assert('Current window start is fixed to 2026-09-14', trend.current.startDate === '2026-09-14');
+  assert('Current window end is fixed to 2026-09-20', trend.current.endDate === '2026-09-20');
+  assert('Current loggedDays is 4 (independent of 7-day window)', trend.current.loggedDays === 4);
+
+  assert('Previous window start is fixed to 2026-09-07', trend.previous.startDate === '2026-09-07');
+  assert('Previous window end is fixed to 2026-09-13', trend.previous.endDate === '2026-09-13');
+  assert('Previous loggedDays is 5 (independent of 7-day window)', trend.previous.loggedDays === 5);
+
+  assert('Calories deltaMean is calculated correctly (+150 kcal)', Math.abs(trend.deltas.calories.deltaMean - 150) < 0.01);
+
+  // Deleting boundary observation does NOT alter window boundaries
+  const sparseHistory = { ...intakeHistory };
+  delete sparseHistory['2026-09-14'];
+  delete sparseHistory['2026-09-20'];
+  const sparseTrend = calculateNutritionalTrendComparison(sparseHistory, { windowDays: 7, referenceDate: refDate });
+
+  assert('Sparse current window start remains 2026-09-14', sparseTrend.current.startDate === '2026-09-14');
+  assert('Sparse current window end remains 2026-09-20', sparseTrend.current.endDate === '2026-09-20');
+  assert('Sparse current loggedDays reflects 2', sparseTrend.current.loggedDays === 2);
 }
 
 console.log(`\nStats Tests Completed: ${failed === 0 ? 'ALL PASSED' : `${failed} FAILED`}\n`);

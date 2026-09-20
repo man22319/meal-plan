@@ -25,6 +25,39 @@ export const UNIT_OPTIONS = [
   'wrap', 'sandwich', 'meal', 'serving'
 ];
 
+// ── Range Parsing Helper ──────────────────────
+
+/**
+ * Parses and normalizes any supported range representation:
+ * - [min, max] or [lower, upper]
+ * - { min, max } or { lower, upper }
+ *
+ * @param {*} rawRange
+ * @returns {{ min: number, max: number, raw: * } | null | { invalid: true }}
+ */
+export function parseRange(rawRange) {
+  if (rawRange === null || rawRange === undefined) return null;
+
+  if (Array.isArray(rawRange)) {
+    if (rawRange.length >= 2) {
+      const min = (rawRange[0] !== null && rawRange[0] !== undefined && rawRange[0] !== '') ? Number(rawRange[0]) : NaN;
+      const max = (rawRange[1] !== null && rawRange[1] !== undefined && rawRange[1] !== '') ? Number(rawRange[1]) : NaN;
+      return { min, max, raw: rawRange };
+    }
+    return { invalid: true };
+  }
+
+  if (typeof rawRange === 'object') {
+    const minVal = rawRange.min !== undefined ? rawRange.min : rawRange.lower;
+    const maxVal = rawRange.max !== undefined ? rawRange.max : rawRange.upper;
+    const min = (minVal !== null && minVal !== undefined && minVal !== '') ? Number(minVal) : NaN;
+    const max = (maxVal !== null && maxVal !== undefined && maxVal !== '') ? Number(maxVal) : NaN;
+    return { min, max, raw: rawRange };
+  }
+
+  return { invalid: true };
+}
+
 // ── Validation ──────────────────────────────
 
 export function validateCustomFood(food) {
@@ -49,7 +82,7 @@ export function validateCustomFood(food) {
     const field = food[m];
     let val;
     let status = rawConf[m];
-    let range = rawRanges[m];
+    let range = rawRanges[m] !== undefined ? rawRanges[m] : food[`${m}Range`];
 
     if (field && typeof field === 'object' && ('value' in field || 'status' in field || 'range' in field)) {
       val = field.value;
@@ -59,43 +92,49 @@ export function validateCustomFood(food) {
       val = field;
     }
 
-    // Validate value
-    if (val !== null && val !== undefined) {
+    // Validate value if provided
+    if (val !== null && val !== undefined && val !== '') {
       if (typeof val !== 'number' || isNaN(val) || val < 0) {
         errors.push(`${m} must be a non-negative number or blank.`);
       }
     }
 
-    // Determine status if not explicitly given
-    const effStatus = (val === null || val === undefined)
-      ? 'unknown'
-      : (status || 'known');
+    const parsedR = parseRange(range);
+    const hasRange = parsedR !== null;
+
+    // Determine status:
+    let effStatus = status;
+    if (!effStatus) {
+      if (val === null || val === undefined || val === '') {
+        effStatus = hasRange ? 'estimated' : 'unknown';
+      } else {
+        effStatus = hasRange ? 'estimated' : 'known';
+      }
+    }
 
     // Range checks
-    if (range !== null && range !== undefined) {
-      if (typeof range !== 'object') {
+    if (hasRange) {
+      if (parsedR.invalid) {
         errors.push(`${m} range must be an object.`);
       } else if (effStatus === 'known') {
         errors.push(`${m} range cannot be supplied for known nutrients.`);
-      } else if (effStatus === 'unknown' || val === null || val === undefined) {
+      } else if (effStatus === 'unknown') {
         errors.push(`${m} range cannot be supplied for unknown nutrients.`);
       } else if (effStatus === 'estimated') {
-        const { min, max } = range;
-        if (min !== null && min !== undefined || max !== null && max !== undefined) {
-          if (typeof min !== 'number' || isNaN(min) || min < 0) {
-            errors.push(`${m} range min must be a non-negative number.`);
+        const { min, max } = parsedR;
+        if (typeof min !== 'number' || isNaN(min) || min < 0) {
+          errors.push(`${m} range min must be a non-negative number.`);
+        }
+        if (typeof max !== 'number' || isNaN(max) || max < 0) {
+          errors.push(`${m} range max must be a non-negative number.`);
+        }
+        if (typeof min === 'number' && typeof max === 'number' && !isNaN(min) && !isNaN(max)) {
+          if (min > max) {
+            errors.push(`${m} range min (${min}) cannot be greater than max (${max}).`);
           }
-          if (typeof max !== 'number' || isNaN(max) || max < 0) {
-            errors.push(`${m} range max must be a non-negative number.`);
-          }
-          if (typeof min === 'number' && typeof max === 'number' && !isNaN(min) && !isNaN(max)) {
-            if (min > max) {
-              errors.push(`${m} range min (${min}) cannot be greater than max (${max}).`);
-            }
-            if (typeof val === 'number' && !isNaN(val)) {
-              if (val < min || val > max) {
-                errors.push(`${m} value (${val}) must fall within the evidence range [${min}, ${max}].`);
-              }
+          if (typeof val === 'number' && !isNaN(val)) {
+            if (val < min || val > max) {
+              errors.push(`${m} value (${val}) must fall within the evidence range [${min}, ${max}].`);
             }
           }
         }
@@ -129,7 +168,7 @@ export function normalizeCustomFood(rawFood) {
     const field = rawFood[m];
     let val;
     let status = rawConf[m];
-    let range = rawRanges[m];
+    let range = rawRanges[m] !== undefined ? rawRanges[m] : rawFood[`${m}Range`];
 
     if (field && typeof field === 'object' && ('value' in field || 'status' in field || 'range' in field)) {
       val = (typeof field.value === 'number' && !isNaN(field.value))
@@ -145,24 +184,24 @@ export function normalizeCustomFood(rawFood) {
 
     normalized[m] = val;
 
+    const parsedR = parseRange(range);
+    const hasValidRange = parsedR && !parsedR.invalid &&
+      typeof parsedR.min === 'number' && !isNaN(parsedR.min) &&
+      typeof parsedR.max === 'number' && !isNaN(parsedR.max) &&
+      parsedR.min <= parsedR.max;
+
     // Determine canonical status
     if (val === null || val === undefined) {
-      status = 'unknown';
+      status = (hasValidRange && status !== 'unknown') ? 'estimated' : 'unknown';
     } else if (!status || !CONFIDENCE_VALUES.includes(status) || status === 'unknown') {
-      status = (range && typeof range === 'object') ? 'estimated' : 'known';
+      status = hasValidRange ? 'estimated' : 'known';
     }
 
     finalConf[m] = status;
 
-    // Determine canonical range
-    if (status === 'estimated' && range && typeof range === 'object') {
-      const min = typeof range.min === 'number' && !isNaN(range.min) ? range.min : null;
-      const max = typeof range.max === 'number' && !isNaN(range.max) ? range.max : null;
-      if (min !== null && max !== null) {
-        finalRanges[m] = { min, max };
-      } else {
-        finalRanges[m] = null;
-      }
+    // Determine canonical range: preserve original range without destroying it
+    if (hasValidRange && status === 'estimated') {
+      finalRanges[m] = { min: parsedR.min, max: parsedR.max };
     } else {
       finalRanges[m] = null;
     }
@@ -170,6 +209,24 @@ export function normalizeCustomFood(rawFood) {
 
   normalized.confidence = finalConf;
   normalized.ranges = finalRanges;
+
+  // Preserve consumption accounting fields
+  const amount = typeof normalized.amount === 'number' ? normalized.amount : 0;
+  const logged = typeof rawFood.amountLogged === 'number'
+    ? rawFood.amountLogged
+    : (typeof rawFood.amount === 'number' ? rawFood.amount : amount);
+  const eaten = typeof rawFood.amountEaten === 'number'
+    ? rawFood.amountEaten
+    : (typeof rawFood.eatenQuantity === 'number' ? rawFood.eatenQuantity : (rawFood.isEaten === false ? 0 : logged));
+  const remaining = typeof rawFood.amountRemaining === 'number'
+    ? rawFood.amountRemaining
+    : Math.max(0, logged - eaten);
+
+  normalized.amountLogged = logged;
+  normalized.amountEaten = eaten;
+  normalized.amountRemaining = remaining;
+  normalized.eatenQuantity = eaten;
+  normalized.isEaten = eaten >= logged;
 
   return normalized;
 }
@@ -210,17 +267,22 @@ export function getRecordedValue(nutrient, customFood) {
  * Authoritative solver-facing planning value accessor.
  *
  * Precedence contract:
- * - KNOWN: recorded value
- * - ESTIMATED + range: midpoint (min + max) / 2
- * - ESTIMATED + no range: recorded value
- * - UNKNOWN: null (no numerical planning contribution)
+ * - Explicit single value (if provided): preserved as authoritative value
+ * - Range-only (empty single value + valid range): arithmetic midpoint (min + max) / 2
+ * - Unknown (no value and no range): null (no numerical planning contribution)
+ *
+ * @param {string} nutrient - 'calories', 'protein', 'carbs', or 'fat'
+ * @param {Object} customFood - Custom food or ingredient item
+ * @returns {number|null} Planning value or null
  */
 export function getPlanningValue(nutrient, customFood) {
   if (!customFood || typeof customFood !== 'object') return null;
 
   let val = customFood[nutrient];
   let status = customFood.confidence?.[nutrient];
-  let range = customFood.ranges?.[nutrient];
+  let range = customFood.ranges?.[nutrient] !== undefined
+    ? customFood.ranges[nutrient]
+    : customFood[`${nutrient}Range`];
 
   if (val && typeof val === 'object' && ('value' in val || 'status' in val || 'range' in val)) {
     if (val.status !== undefined) status = val.status;
@@ -228,21 +290,37 @@ export function getPlanningValue(nutrient, customFood) {
     val = val.value;
   }
 
+  const parsedR = parseRange(range);
+  const hasValidRange = parsedR && !parsedR.invalid &&
+    typeof parsedR.min === 'number' && !isNaN(parsedR.min) &&
+    typeof parsedR.max === 'number' && !isNaN(parsedR.max) &&
+    parsedR.min <= parsedR.max;
+
+  const hasExplicitVal = typeof val === 'number' && !isNaN(val);
+
   if (!status) {
-    status = (val === null || val === undefined) ? 'unknown' : 'known';
+    if (hasExplicitVal) {
+      status = 'known';
+    } else if (hasValidRange) {
+      status = 'estimated';
+    } else {
+      status = 'unknown';
+    }
   }
 
   if (status === 'known') {
-    return (typeof val === 'number' && !isNaN(val)) ? val : null;
+    return hasExplicitVal ? val : null;
   }
 
   if (status === 'estimated') {
-    if (range && typeof range === 'object' &&
-        typeof range.min === 'number' && !isNaN(range.min) &&
-        typeof range.max === 'number' && !isNaN(range.max)) {
-      return (range.min + range.max) / 2;
+    if (hasValidRange) {
+      return (parsedR.min + parsedR.max) / 2;
     }
-    return (typeof val === 'number' && !isNaN(val)) ? val : null;
+    return hasExplicitVal ? val : null;
+  }
+
+  if (status !== 'unknown' && hasValidRange) {
+    return (parsedR.min + parsedR.max) / 2;
   }
 
   return null;
@@ -260,6 +338,9 @@ export function addCustomFood(food) {
     id: generateId('cf'),
     name: norm.name.trim(),
     amount: norm.amount,
+    amountLogged: norm.amountLogged,
+    amountEaten: norm.amountEaten,
+    amountRemaining: norm.amountRemaining,
     unit: norm.unit.trim(),
     calories: norm.calories ?? null,
     protein: norm.protein ?? null,
@@ -271,8 +352,8 @@ export function addCustomFood(food) {
     foodDefId: norm.foodDefId || norm.foodDefinitionId || null,
     foodDefinitionId: norm.foodDefinitionId || norm.foodDefId || null,
     servings: typeof norm.servings === 'number' ? norm.servings : null,
-    isEaten: typeof norm.isEaten === 'boolean' ? norm.isEaten : true,
-    eatenQuantity: typeof norm.eatenQuantity === 'number' ? norm.eatenQuantity : norm.amount
+    isEaten: norm.isEaten,
+    eatenQuantity: norm.eatenQuantity
   };
 
   state.customFoods.push(entry);
@@ -305,6 +386,9 @@ export function updateCustomFood(id, patch) {
 
   existing.name = norm.name.trim();
   existing.amount = norm.amount;
+  existing.amountLogged = norm.amountLogged;
+  existing.amountEaten = norm.amountEaten;
+  existing.amountRemaining = norm.amountRemaining;
   existing.unit = norm.unit.trim();
   existing.calories = norm.calories ?? null;
   existing.protein = norm.protein ?? null;
@@ -316,10 +400,49 @@ export function updateCustomFood(id, patch) {
   if (norm.foodDefId !== undefined) existing.foodDefId = norm.foodDefId;
   if (norm.foodDefinitionId !== undefined) existing.foodDefinitionId = norm.foodDefinitionId;
   if (norm.servings !== undefined) existing.servings = norm.servings;
-  if (norm.isEaten !== undefined) existing.isEaten = norm.isEaten;
-  if (norm.eatenQuantity !== undefined) existing.eatenQuantity = norm.eatenQuantity;
+  existing.isEaten = norm.isEaten;
+  existing.eatenQuantity = norm.eatenQuantity;
 
   return { entry: existing };
+}
+
+/**
+ * Records cumulative partial consumption for a custom food / measured ingredient.
+ * Updates amountEaten, derives amountRemaining = max(0, amountLogged - amountEaten),
+ * and syncs eatenQuantity and isEaten.
+ *
+ * Repeated updates overwrite the current cumulative amountEaten rather than adding to it.
+ *
+ * @param {string} id - Custom food ID
+ * @param {number} amountEaten - Cumulative amount consumed
+ * @param {Object} customState - Application state (defaults to global state)
+ * @returns {{ entry?: Object, errors?: string[] }}
+ */
+export function recordPartialConsumption(id, amountEaten, customState = state) {
+  const foods = customState?.customFoods || state?.customFoods || [];
+  const entry = foods.find(cf => cf.id === id);
+  if (!entry) return { errors: ['Custom food not found.'] };
+
+  if (amountEaten === null || amountEaten === undefined || amountEaten === '' || typeof amountEaten === 'boolean') {
+    return { errors: ['Enter a valid eaten amount >= 0.'] };
+  }
+  const numEaten = Number(amountEaten);
+  if (isNaN(numEaten) || !isFinite(numEaten) || numEaten < 0) {
+    return { errors: ['Enter a valid eaten amount >= 0.'] };
+  }
+
+  const logged = (typeof entry.amountLogged === 'number')
+    ? entry.amountLogged
+    : ((typeof entry.amount === 'number') ? entry.amount : 0);
+
+  const clampedEaten = Math.min(logged, numEaten);
+  entry.amountLogged = logged;
+  entry.amountEaten = clampedEaten;
+  entry.amountRemaining = Math.max(0, logged - clampedEaten);
+  entry.eatenQuantity = clampedEaten;
+  entry.isEaten = clampedEaten >= logged;
+
+  return { entry, errors: [] };
 }
 
 export function removeCustomFood(id) {
@@ -425,6 +548,9 @@ export function createCustomFoodFromIngredient(foodDefId, actualAmount, unit, cu
     foodDefId: ingredient.id,
     foodDefinitionId: ingredient.id,
     amount: numAmount,
+    amountLogged: numAmount,
+    amountEaten: numAmount,
+    amountRemaining: 0,
     unit: canonicalUnit,
     servings,
     calories,
@@ -483,22 +609,25 @@ export function aggregateCustomFoods(mealFilter = null, customFoods = null, opti
 
   filtered.forEach(cf => {
     MACROS.forEach(m => {
+      const pVal = getPlanningValue(m, cf);
+      const rVal = getRecordedValue(m, cf);
       const status = cf.confidence?.[m] || (cf[m] === null || cf[m] === undefined ? 'unknown' : 'known');
-      if (status === 'unknown') {
+      if (status === 'unknown' && pVal === null) {
         result[m].hasUnknown = true;
       }
 
       if (usePlanning) {
-        const pVal = getPlanningValue(m, cf);
         if (pVal !== null) {
           result[m].total += pVal;
           result[m].known += pVal;
         }
       } else {
-        const rVal = getRecordedValue(m, cf);
         if (rVal !== null) {
           result[m].total += rVal;
           result[m].known += rVal;
+        } else if (pVal !== null) {
+          result[m].total += pVal;
+          result[m].known += pVal;
         }
       }
     });

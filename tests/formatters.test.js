@@ -8,7 +8,9 @@ import {
   formatWeightTrendAndHistorySummary,
   formatPercent,
   formatCalorieDeviation,
-  formatMacroDeviation
+  formatMacroDeviation,
+  formatDeltaJ,
+  formatNutritionalTrendComparison
 } from '../src/core/formatters.js';
 
 let failed = 0;
@@ -454,6 +456,87 @@ console.log('══════════════════════�
   assert('Test I: Insufficient data shows minimum required: 3', insufficientText.includes('Minimum required: 3'));
   assert('Test I: Insufficient data still includes longitudinal history table', insufficientText.includes('LONGITUDINAL HISTORY\n2 DAYS'));
   assert('Test I: Insufficient data contains no NaN or undefined', !insufficientText.includes('NaN') && !insufficientText.includes('undefined'));
+}
+
+// ── TEST J: formatDeltaJ Presentation Rules ──
+{
+  // Exact zero -> neutral display
+  assert('Test J: 0 displays neutral ≈ 0', formatDeltaJ(0) === '≈ 0');
+  assert('Test J: null/undefined displays neutral ≈ 0', formatDeltaJ(null) === '≈ 0' && formatDeltaJ(undefined) === '≈ 0');
+
+  // Floating-point noise (< 1e-6) -> neutral display
+  assert('Test J: 1e-7 floating-point noise displays ≈ 0', formatDeltaJ(1e-7) === '≈ 0');
+  assert('Test J: -1e-7 floating-point noise displays ≈ 0', formatDeltaJ(-1e-7) === '≈ 0');
+
+  // Below presentation threshold (< 0.005) -> neutral display
+  assert('Test J: +0.001 displays ≈ 0', formatDeltaJ(0.001) === '≈ 0');
+  assert('Test J: -0.001 displays ≈ 0', formatDeltaJ(-0.001) === '≈ 0');
+  assert('Test J: +0.0049 displays ≈ 0', formatDeltaJ(0.0049) === '≈ 0');
+
+  // Non-zero delta with 0% scorePct -> suppressed to ≈ 0 (no misleading "+0.001 ΔJ (0%)")
+  assert('Test J: Non-zero delta with 0% scorePct displays ≈ 0', formatDeltaJ(0.001, 0) === '≈ 0');
+  assert('Test J: Threshold delta with 0% scorePct displays ≈ 0', formatDeltaJ(0.006, 0) === '≈ 0');
+  assert('Test J: String "0%" scorePct displays ≈ 0', formatDeltaJ(0.006, '0%') === '≈ 0');
+
+  // Threshold boundary (>= 0.005) with meaningful percentage
+  assert('Test J: Boundary 0.005 with 5% formats readable positive change', formatDeltaJ(0.005, 5) === '+0.005 ΔJ (5%)');
+
+  // Meaningful positive delta
+  assert('Test J: Meaningful positive delta formats sign, 3 decimals and score', formatDeltaJ(0.05, 12) === '+0.050 ΔJ (12%)');
+  assert('Test J: Meaningful positive delta without scorePct formats correctly', formatDeltaJ(0.05) === '+0.050 ΔJ');
+
+  // Meaningful negative delta
+  assert('Test J: Meaningful negative delta formats negative sign and score', formatDeltaJ(-0.05, 12) === '-0.050 ΔJ (12%)');
+  assert('Test J: Meaningful negative delta without scorePct formats correctly', formatDeltaJ(-0.05) === '-0.050 ΔJ');
+}
+
+// ── TEST K: formatNutritionalTrendComparison Formatting ──
+{
+  const mockTrend = {
+    calendarDays: 7,
+    windows: {
+      currentStart: '2026-09-14',
+      currentEnd: '2026-09-20',
+      previousStart: '2026-09-07',
+      previousEnd: '2026-09-13',
+      calendarDays: 7
+    },
+    current: {
+      startDate: '2026-09-14',
+      endDate: '2026-09-20',
+      loggedDays: 6,
+      stats: {
+        calories: { mean: 2200 },
+        protein: { mean: 160 },
+        carbs: { mean: 220 },
+        fat: { mean: 60 }
+      }
+    },
+    previous: {
+      startDate: '2026-09-07',
+      endDate: '2026-09-13',
+      loggedDays: 7,
+      stats: {
+        calories: { mean: 2000 },
+        protein: { mean: 150 },
+        carbs: { mean: 200 },
+        fat: { mean: 55 }
+      }
+    },
+    deltas: {
+      calories: { deltaMean: 200, percentChange: 10 },
+      protein: { deltaMean: 10, percentChange: 6.7 },
+      carbs: { deltaMean: 20, percentChange: 10 },
+      fat: { deltaMean: 5, percentChange: 9.1 }
+    }
+  };
+
+  const text = formatNutritionalTrendComparison(mockTrend);
+  assert('Test K: Starts with 7-DAY COMPARISON', text.includes('7-DAY COMPARISON'));
+  assert('Test K: Reports current window dates and 6 logged days', text.includes('Current:  2026-09-14 to 2026-09-20 (6 logged days)'));
+  assert('Test K: Reports previous window dates and 7 logged days', text.includes('Previous: 2026-09-07 to 2026-09-13 (7 logged days)'));
+  assert('Test K: Distinguishes calendar span from observation count (no 6/7 fraction)', !text.includes('6/7'));
+  assert('Test K: Formats calorie delta with mean and percent', text.includes('+200.0 kcal (+10.0%)'));
 }
 
 

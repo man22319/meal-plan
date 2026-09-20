@@ -35,6 +35,7 @@ import {
   calcMacroCalories,
   calcMacroCalorieDelta,
   solveModel,
+  isMeaningfulSolverQuantity,
   Optimization
 } from '../src/core/solver.js';
 import { state, DEFAULT_TARGETS, DEFAULT_MEALS, DEFAULT_INGREDIENTS } from '../src/core/state.js';
@@ -453,6 +454,79 @@ export function runSolverTestSuite() {
     assert('Test 13D: Multiple eaten items remain frozen (FoodA=100g, FoodB=250g)',
       Math.abs(postA2.quantity - 100) < 0.001 && postA2.isEaten === true &&
       Math.abs(postB2.quantity - 250) < 0.001 && postB2.isEaten === true);
+  }
+
+  // ── TEST 14: Minimum Meaningful Solver Servings & Quantities ──
+  {
+    // Continuous items: minimum is 2 g or 2 mL
+    assert('Test 14A: Continuous 0 g is not meaningful', isMeaningfulSolverQuantity(0, 'g', 'continuous') === false);
+    assert('Test 14A: Continuous 1 g is not meaningful', isMeaningfulSolverQuantity(1, 'g', 'continuous') === false);
+    assert('Test 14A: Continuous 1.6 g is not meaningful (no Math.round upward)', isMeaningfulSolverQuantity(1.6, 'g', 'continuous') === false);
+    assert('Test 14A: Continuous 1.99 g is not meaningful', isMeaningfulSolverQuantity(1.99, 'g', 'continuous') === false);
+    assert('Test 14A: Continuous 2.0 g is meaningful', isMeaningfulSolverQuantity(2.0, 'g', 'continuous') === true);
+    assert('Test 14A: Continuous 2.5 g is meaningful', isMeaningfulSolverQuantity(2.5, 'g', 'continuous') === true);
+
+    assert('Test 14B: Continuous 0 mL is not meaningful', isMeaningfulSolverQuantity(0, 'mL', 'continuous') === false);
+    assert('Test 14B: Continuous 1 mL is not meaningful', isMeaningfulSolverQuantity(1, 'mL', 'continuous') === false);
+    assert('Test 14B: Continuous 2 mL is meaningful', isMeaningfulSolverQuantity(2, 'mL', 'continuous') === true);
+
+    // Discrete items: must have at least 1 discrete unit
+    assert('Test 14C: Discrete 0 is not meaningful', isMeaningfulSolverQuantity(0, 'item', 'discrete') === false);
+    assert('Test 14C: Discrete 0.5 is not meaningful', isMeaningfulSolverQuantity(0.5, 'egg', 'discrete') === false);
+    assert('Test 14C: Discrete 1 is meaningful', isMeaningfulSolverQuantity(1, 'egg', 'discrete') === true);
+    assert('Test 14C: Discrete 2 is meaningful', isMeaningfulSolverQuantity(2, 'item', 'discrete') === true);
+
+    // Manual actuals / eaten items: 1 g is NOT rejected or rounded
+    resetTestState();
+    state.meals = [{ id: 'meal_0', name: 'Meal 1', pct: 100 }];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 3 };
+    state.targets = { calories: 590, protein: 50, carbs: 75, fat: 10 };
+    state.ingredients = [
+      { id: 'ing_carb', name: 'FoodA', servingSize: 100, unit: 'g', calories: 100, protein: 0, carbs: 25, fat: 0, minServings: 0, maxServings: 10, quantityMode: 'continuous', availability: 'normal' },
+      { id: 'ing_pro', name: 'FoodB', servingSize: 100, unit: 'g', calories: 100, protein: 25, carbs: 0, fat: 0, minServings: 0, maxServings: 10, quantityMode: 'continuous', availability: 'normal' }
+    ];
+    Optimization.recordActual('meal_0', 'ing_carb', 1, 100);
+    const solveRes = Optimization.solve({ preserveActuals: true });
+    const item = solveRes.result?.mealResults[0]?.items.find(i => i.id === 'ing_carb');
+    assert('Test 14D: Manual actual of 1g bypasses solver minimum and is preserved',
+      item && item.isActual === true && Math.abs(item.quantity - 1) < 0.001);
+  }
+
+  // ── TEST 15: Solver Range-Derived Nutrient Coefficients ──
+  {
+    // Ingredient with range-only nutrition: calories = null, caloriesRange = [200, 300]
+    resetTestState();
+    state.meals = [{ id: 'meal_0', name: 'Solo', pct: 100 }];
+    state.mealConstraints = { minIngredients: 1, maxIngredients: 3 };
+    state.targets = { calories: 500, protein: 40, carbs: 50, fat: 10 };
+    state.ingredients = [
+      {
+        id: 'ing_range_only',
+        name: 'Range Food',
+        servingSize: 100,
+        unit: 'g',
+        calories: null,
+        caloriesRange: [200, 300],
+        protein: 20,
+        carbs: 25,
+        fat: 5,
+        minServings: 1,
+        maxServings: 5,
+        quantityMode: 'continuous',
+        availability: 'normal'
+      }
+    ];
+
+    const solveRes = Optimization.solve({ preserveActuals: false });
+    assert('Test 15: Solver solves feasibly with range-only ingredient',
+      Boolean(solveRes.result) && !solveRes.errors);
+    const solvedItems = solveRes.result?.mealResults[0]?.items || [];
+    const rangeItem = solvedItems.find(i => i.name === 'Range Food');
+    assert('Test 15: Range food is allocated by solver', Boolean(rangeItem));
+    if (rangeItem) {
+      assert('Test 15: Range food calories per serving is 250 (arithmetic midpoint of [200, 300])',
+        Math.abs(rangeItem.calories / rangeItem.servings - 250) < 1.0);
+    }
   }
 
   console.log(`\nMacro-Calorie Solver Tests: ${failed === 0 ? 'ALL PASSED' : `${failed} FAILED`}\n`);

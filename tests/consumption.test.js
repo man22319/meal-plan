@@ -15,6 +15,7 @@ import { Optimization } from '../src/core/solver.js';
 import { formatDailySummary } from '../src/core/formatters.js';
 import { Persistence } from '../src/io/persistence.js';
 import { UI } from '../src/ui/render.js';
+import { createCustomFoodFromIngredient, recordPartialConsumption } from '../src/core/customFoods.js';
 
 // Global mock solver and localStorage if in Node environment
 import fs from 'node:fs';
@@ -976,6 +977,91 @@ export function runConsumptionTestSuite() {
     global.document.getElementById = origGetById;
     console.log('[CS-19] Meal Cards Render Invariant: PASSED');
   }
+
+  // ── TEST CS-20: Cumulative Consumption Accounting for Partially Eaten Measured Ingredients ──
+  {
+    resetTestState();
+    const chickenDef = state.ingredients.find(i => i.id === 'ing_chicken');
+    assert.ok(chickenDef, 'Chicken definition must exist');
+
+    // 1. Create a measured custom food from Chicken: 100 g logged
+    const created = createCustomFoodFromIngredient(chickenDef.id, 100, 'g', state);
+    assert.strictEqual(created.errors.length, 0, 'No errors creating measured custom food');
+    const foodEntry = created.entry;
+    assert.strictEqual(foodEntry.amountLogged, 100, 'Initial amountLogged is 100 g');
+    assert.strictEqual(foodEntry.amountEaten, 100, 'Initial amountEaten is 100 g');
+    assert.strictEqual(foodEntry.amountRemaining, 0, 'Initial amountRemaining is 0 g');
+
+    // 2. Record partial consumption: 40 g eaten out of 100 g
+    const resPartial = recordPartialConsumption(foodEntry.id, 40, state);
+    assert.strictEqual(resPartial.errors.length, 0, 'No errors recording partial consumption');
+    assert.strictEqual(foodEntry.amountLogged, 100, 'Logged remains 100 g');
+    assert.strictEqual(foodEntry.amountEaten, 40, 'amountEaten is 40 g');
+    assert.strictEqual(foodEntry.amountRemaining, 60, 'amountRemaining is 60 g');
+    assert.strictEqual(foodEntry.eatenQuantity, 40, 'eatenQuantity matches 40 g');
+    assert.strictEqual(foodEntry.isEaten, false, 'isEaten is false for partial');
+
+    // Check consolidated consumption aggregation
+    const aggPartial = aggregateIngredients(state.result?.mealResults || [], state.customFoods);
+    const chickenAgg = aggPartial.find(i => i.name === 'Chicken' || i.foodDefinitionId === chickenDef.id);
+    assert.ok(chickenAgg, 'Chicken aggregated entry must exist');
+    assert.strictEqual(chickenAgg.plannedAmount, 100, 'Planned amount is 100 g');
+    assert.strictEqual(chickenAgg.consolidatedEaten, 40, 'Consolidated eaten is 40 g');
+
+    const consPartial = calculateConsumption(aggPartial);
+    const consItem = consPartial.items.find(i => i.name === 'Chicken' || i.foodDefinitionId === chickenDef.id);
+    assert.ok(consItem, 'Chicken consumption item must exist');
+    assert.strictEqual(consItem.plannedAmount, 100, 'Planned quantity is 100 g');
+    assert.strictEqual(consItem.eatenAmount, 40, 'Eaten quantity is 40 g');
+    assert.strictEqual(consItem.remainingAmount, 60, 'Remaining quantity is 60 g');
+
+    // Nutrition check: 100g Chicken = 165 kcal. 40g eaten = 66 kcal, 60g remaining = 99 kcal
+    assert.strictEqual(Math.round(consItem.eatenMacros.calories), 66, 'Eaten calories is 66 kcal');
+    assert.strictEqual(Math.round(consItem.remainingMacros.calories), 99, 'Remaining calories is 99 kcal');
+    assert.strictEqual(Math.round(consPartial.eatenTotals.calories), 66, 'Consolidated eaten calories is 66 kcal');
+
+    // 3. Cumulative update: Update 40 g eaten to 70 g eaten (must replace cumulative, NOT add to 110 g)
+    const resUpdate = recordPartialConsumption(foodEntry.id, 70, state);
+    assert.strictEqual(resUpdate.errors.length, 0, 'No errors on update');
+    assert.strictEqual(foodEntry.amountLogged, 100, 'Logged remains 100 g');
+    assert.strictEqual(foodEntry.amountEaten, 70, 'amountEaten replaces cumulative to 70 g');
+    assert.strictEqual(foodEntry.amountRemaining, 30, 'amountRemaining is 30 g');
+    assert.strictEqual(foodEntry.eatenQuantity, 70, 'eatenQuantity is 70 g (not 110 g)');
+    assert.strictEqual(foodEntry.isEaten, false, 'isEaten is false');
+
+    const aggUpdated = aggregateIngredients(state.result?.mealResults || [], state.customFoods);
+    const chickenAgg2 = aggUpdated.find(i => i.name === 'Chicken' || i.foodDefinitionId === chickenDef.id);
+    assert.strictEqual(chickenAgg2.plannedAmount, 100, 'Planned amount remains 100 g');
+    assert.strictEqual(chickenAgg2.consolidatedEaten, 70, 'Consolidated eaten is 70 g (not 110 g)');
+
+    const consUpdated = calculateConsumption(aggUpdated);
+    const consItem2 = consUpdated.items.find(i => i.name === 'Chicken' || i.foodDefinitionId === chickenDef.id);
+    assert.strictEqual(consItem2.eatenAmount, 70, 'Eaten quantity is 70 g');
+    assert.strictEqual(consItem2.remainingAmount, 30, 'Remaining quantity is 30 g');
+
+    // 4. Repeated update: Setting 70 g again is idempotent
+    recordPartialConsumption(foodEntry.id, 70, state);
+    assert.strictEqual(foodEntry.amountEaten, 70, 'Repeated update leaves eaten at 70 g');
+    assert.strictEqual(foodEntry.amountRemaining, 30, 'Repeated update leaves remaining at 30 g');
+
+    // 5. Complete consumption: 100 g eaten
+    recordPartialConsumption(foodEntry.id, 100, state);
+    assert.strictEqual(foodEntry.amountEaten, 100, 'amountEaten is 100 g');
+    assert.strictEqual(foodEntry.amountRemaining, 0, 'amountRemaining is 0 g');
+    assert.strictEqual(foodEntry.isEaten, true, 'isEaten becomes true');
+
+    const aggFull = aggregateIngredients(state.result?.mealResults || [], state.customFoods);
+    const consFull = calculateConsumption(aggFull);
+    const consItem3 = consFull.items.find(i => i.name === 'Chicken' || i.foodDefinitionId === chickenDef.id);
+    assert.strictEqual(consItem3.eatenAmount, 100, 'Full eaten quantity is 100 g');
+    assert.strictEqual(consItem3.remainingAmount, 0, 'Full remaining quantity is 0 g');
+    assert.strictEqual(Math.round(consItem3.eatenMacros.calories), 165, 'Full eaten calories is 165 kcal');
+    assert.strictEqual(Math.round(consItem3.remainingMacros.calories), 0, 'Full remaining calories is 0 kcal');
+
+    console.log('[CS-20] Cumulative Consumption Accounting for Partially Eaten Measured Ingredients: PASSED');
+  }
+
+  resetTestState();
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

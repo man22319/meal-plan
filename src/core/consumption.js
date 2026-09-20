@@ -276,6 +276,10 @@ export function aggregateIngredients(solverResult, customFoods = [], eatenItems 
       const foodDefId = cf.foodDefinitionId || cf.foodDefId || cf.id;
       if (!foodDefId) return;
 
+      const loggedQty = typeof cf.amountLogged === 'number'
+        ? cf.amountLogged
+        : (typeof cf.amount === 'number' && cf.amount > 0 ? cf.amount : 1);
+
       let group = groups.get(foodDefId);
       if (!group) {
         const amount = typeof cf.amount === 'number' && cf.amount > 0 ? cf.amount : 1;
@@ -301,21 +305,24 @@ export function aggregateIngredients(solverResult, customFoods = [], eatenItems 
         groups.set(foodDefId, group);
       }
 
-      const qty = typeof cf.amount === 'number' ? cf.amount : 1;
-      group.plannedAmount += qty;
-      group.totalServings += (group.servingSize > 0 ? qty / group.servingSize : 1);
+      group.plannedAmount += loggedQty;
+      group.totalServings += (group.servingSize > 0 ? loggedQty / group.servingSize : 1);
+
       // Resolve custom food eaten quantity with deterministic precedence:
       // 1. Explicit eaten quantity in eatenItems state map
-      // 2. Explicit cf.eatenQuantity property on custom food object
-      // 3. Explicit cf.isEaten === false (marked uneaten -> 0)
-      // 4. Default: qty (custom foods represent fixed consumed nutrition already eaten)
-      let itemEaten = qty;
+      // 2. Explicit cf.amountEaten property on custom food object
+      // 3. Explicit cf.eatenQuantity property on custom food object
+      // 4. Explicit cf.isEaten === false (marked uneaten -> 0)
+      // 5. Default: loggedQty (custom foods represent fixed consumed nutrition already eaten)
+      let itemEaten = loggedQty;
       const mealKey = `${cf.meal || 'custom'}_${foodDefId}`;
       const eatenFromMap = getItemEatenQuantity(cf.meal || 'custom', foodDefId, eatenItems)
         || (eatenItems?.[mealKey]?.eatenQuantity ?? eatenItems?.[mealKey]?.quantity);
 
       if (typeof eatenFromMap === 'number' && eatenFromMap >= 0) {
         itemEaten = eatenFromMap;
+      } else if (typeof cf.amountEaten === 'number') {
+        itemEaten = cf.amountEaten;
       } else if (typeof cf.eatenQuantity === 'number') {
         itemEaten = cf.eatenQuantity;
       } else if (cf.isEaten === false) {
@@ -325,8 +332,8 @@ export function aggregateIngredients(solverResult, customFoods = [], eatenItems 
       group.meals.push({
         mealId: cf.meal || null,
         mealName: cf.meal || 'Custom Food',
-        amount: qty,
-        servings: group.servingSize > 0 ? qty / group.servingSize : 1,
+        amount: loggedQty,
+        servings: group.servingSize > 0 ? loggedQty / group.servingSize : 1,
         unit: cf.unit || group.unit,
         eatenQuantity: itemEaten
       });

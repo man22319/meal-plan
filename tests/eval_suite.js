@@ -813,6 +813,7 @@ export function runAvailabilityTestSuite() {
     };
     state.actuals = {};
     state.eatenItems = {};
+    state.customFoods = [];
     state.meals = [{ name: 'Single Meal', pct: 100 }];
     state.targets = { calories: 350, protein: 32, carbs: 30, fat: 5 };
   }

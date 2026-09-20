@@ -74,7 +74,7 @@ export function getIntakeObservations(intakeHistory, windowDays = null, referenc
   const entries = Object.entries(intakeHistory)
     .map(([date, rec]) => {
       const ms = parseDateToMs(date);
-      const totals = rec?.totals;
+      const totals = rec?.totals || (rec && typeof rec === 'object' && ('calories' in rec || 'protein' in rec) ? rec : null);
       return { date, ms, totals, rec };
     })
     .filter(e => !isNaN(e.ms) && e.totals && (typeof e.totals.calories === 'number' || e.totals.calories === null))
@@ -528,3 +528,100 @@ export function getCombinedHistoryRows(weightHistory = {}, intakeHistory = {}) {
 
   return rows;
 }
+
+/**
+ * Calculates aligned calendar comparison windows with equivalent weekday boundaries.
+ * For a window length of W calendar days ending on referenceDate:
+ *   Current window:  [referenceDate - (W - 1) days, referenceDate]
+ *   Previous window: [referenceDate - (2W - 1) days, referenceDate - W days]
+ *
+ * When W is a weekly multiple (7, 14, 28, 91), both windows start and end on the
+ * identical day of the week.
+ *
+ * @param {string|null} referenceDate - End date for current window (YYYY-MM-DD). Defaults to today/latest.
+ * @param {number} windowDays - Window length W in calendar days (e.g. 7, 14, 28, 91).
+ * @returns {{ currentStart: string, currentEnd: string, previousStart: string, previousEnd: string, calendarDays: number }}
+ */
+export function getAlignedComparisonWindows(referenceDate = null, windowDays = 7) {
+  const refDateStr = referenceDate || getLocalDateString();
+  const refMs = parseDateToMs(refDateStr);
+  const W = (typeof windowDays === 'number' && windowDays > 0) ? windowDays : 7;
+  const dayMs = 86400000;
+
+  const curEndMs = refMs;
+  const curStartMs = refMs - (W - 1) * dayMs;
+
+  const prevEndMs = refMs - W * dayMs;
+  const prevStartMs = refMs - (2 * W - 1) * dayMs;
+
+  return {
+    currentStart: formatDateStr(curStartMs),
+    currentEnd: formatDateStr(curEndMs),
+    previousStart: formatDateStr(prevStartMs),
+    previousEnd: formatDateStr(prevEndMs),
+    calendarDays: W
+  };
+}
+
+/**
+ * Calculates nutritional trend comparison across two aligned calendar windows.
+ * Distinguishes calendar span (W days) from the count of logged observations (n).
+ * Missing observations inside or at boundaries do not shift window dates.
+ *
+ * @param {Object} intakeHistory - Intake history map
+ * @param {Object} [options={}]
+ * @param {number} [options.windowDays=7] - Calendar window span W
+ * @param {string|null} [options.referenceDate=null] - End date of current window
+ * @param {Object|null} [options.fallbackTargets=null] - Daily targets
+ * @returns {Object} Comparison statistics object
+ */
+export function calculateNutritionalTrendComparison(intakeHistory, {
+  windowDays = 7,
+  referenceDate = null,
+  fallbackTargets = null
+} = {}) {
+  const windows = getAlignedComparisonWindows(referenceDate, windowDays);
+
+  const currentStats = calculateIntakeStats(intakeHistory, windowDays, windows.currentEnd, fallbackTargets);
+  const previousStats = calculateIntakeStats(intakeHistory, windowDays, windows.previousEnd, fallbackTargets);
+
+  const currentObservations = getIntakeObservations(intakeHistory, windowDays, windows.currentEnd);
+  const previousObservations = getIntakeObservations(intakeHistory, windowDays, windows.previousEnd);
+
+  const deltas = {};
+  const nutrients = ['calories', 'protein', 'carbs', 'fat'];
+  nutrients.forEach(nutrient => {
+    const cur = currentStats[nutrient];
+    const prev = previousStats[nutrient];
+    const deltaMean = (cur.mean !== null && prev.mean !== null) ? cur.mean - prev.mean : null;
+    const deltaMedian = (cur.median !== null && prev.median !== null) ? cur.median - prev.median : null;
+    deltas[nutrient] = {
+      deltaMean,
+      deltaMedian,
+      percentChange: (prev.mean !== null && prev.mean !== 0 && deltaMean !== null)
+        ? (deltaMean / prev.mean) * 100
+        : null
+    };
+  });
+
+  return {
+    windows,
+    calendarDays: windows.calendarDays,
+    current: {
+      startDate: windows.currentStart,
+      endDate: windows.currentEnd,
+      loggedDays: currentStats.distinctDays,
+      observationCount: currentObservations.length,
+      stats: currentStats
+    },
+    previous: {
+      startDate: windows.previousStart,
+      endDate: windows.previousEnd,
+      loggedDays: previousStats.distinctDays,
+      observationCount: previousObservations.length,
+      stats: previousStats
+    },
+    deltas
+  };
+}
+

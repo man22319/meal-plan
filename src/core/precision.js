@@ -57,6 +57,17 @@ export const PRECISION = Object.freeze({
    * Validation tolerance for meal percentage sum (e.g. 33.33 + 33.33 + 33.34 = 100).
    */
   MEAL_PCT_SUM_TOLERANCE: 1e-2, // 0.01%
+  /**
+   * Minimum meaningful serving quantity for continuous solver-generated ingredients (2 g or 2 mL).
+   * Prevents meaningless 0 g or 1 g serving recommendations.
+   */
+  MIN_MEANINGFUL_CONTINUOUS_QTY: 2,
+
+  /**
+   * User-facing presentation threshold for Delta J (ΔJ) objective improvement.
+   * Suppresses floating-point noise and negligible changes in favor of neutral indicators.
+   */
+  DELTA_J_MIN_DISPLAY: 0.005,
 
   /**
    * UI Display Rounding Configuration (presentation layer only).

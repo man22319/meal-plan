@@ -5,6 +5,7 @@
 import { AVAILABILITY_STATES, state } from './state.js';
 import { PRECISION } from './precision.js';
 import { formatPercent } from './formatters.js';
+import { getPlanningValue } from './customFoods.js';
 
 export const Validation = {
   validateAll(customState = state) {
@@ -71,10 +72,16 @@ export const Validation = {
       }
 
       const servingSize = (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : ing.servingSize;
-      const calories = (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : ing.calories;
-      const protein = (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : ing.protein;
-      const carbs = (ing.carbs === '' || typeof ing.carbs === 'undefined') ? 0 : ing.carbs;
-      const fat = (ing.fat === '' || typeof ing.fat === 'undefined') ? 0 : ing.fat;
+      const resolveMacro = (k) => {
+        const p = getPlanningValue(k, ing);
+        if (p !== null && typeof p === 'number' && !isNaN(p)) return p;
+        const v = ing[k];
+        return (v === '' || typeof v === 'undefined') ? 0 : v;
+      };
+      const calories = resolveMacro('calories');
+      const protein = resolveMacro('protein');
+      const carbs = resolveMacro('carbs');
+      const fat = resolveMacro('fat');
       const minServings = (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : ing.minServings;
       const maxServings = (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : ing.maxServings;
 

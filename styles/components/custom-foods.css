@@ -670,8 +670,8 @@
 }
 
 .measured-food-preview {
-  background: rgba(59, 130, 246, 0.06);
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: var(--bg2, rgba(40, 40, 40, 0.4));
+  border: 1px solid var(--border-hi, rgba(255, 255, 255, 0.20));
   border-radius: 8px;
   padding: 12px 14px;
   display: flex;

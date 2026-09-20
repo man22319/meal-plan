@@ -10,8 +10,34 @@
 import { state, ensureId, generateId, copyMeal, ensureIngredientId } from './state.js';
 import { Validation } from './validation.js';
 import { PRECISION } from './precision.js';
-import { getRemainingTargets, getRemainingMealTarget, aggregateCustomFoods } from './customFoods.js';
+import { getRemainingTargets, getRemainingMealTarget, aggregateCustomFoods, getPlanningValue } from './customFoods.js';
 import { distributeConsolidatedEaten } from './consumption.js';
+
+/**
+ * Validates whether a solver-generated allocation is practically meaningful.
+ * Separate rules apply for continuous and discrete ingredients:
+ * - Continuous ingredients in g or mL require at least MIN_MEANINGFUL_CONTINUOUS_QTY (2 g or 2 mL).
+ * - Discrete ingredients require at least 1 discrete unit.
+ * Manual recorded observations (isActual or isEaten) intentionally bypass this constraint.
+ *
+ * @param {number} quantity - Physical quantity in ingredient units
+ * @param {string} unit - 'g', 'mL', etc.
+ * @param {string} quantityMode - 'continuous' or 'discrete'
+ * @returns {boolean} True if meaningful solver quantity
+ */
+export function isMeaningfulSolverQuantity(quantity, unit = 'g', quantityMode = 'continuous') {
+  if (typeof quantity !== 'number' || isNaN(quantity) || quantity <= 0) {
+    return false;
+  }
+  if (quantityMode === 'discrete') {
+    return quantity >= 1;
+  }
+  const u = (unit || 'g').trim().toLowerCase();
+  if (u === 'g' || u === 'ml') {
+    return quantity >= PRECISION.MIN_MEANINGFUL_CONTINUOUS_QTY;
+  }
+  return quantity >= PRECISION.MIN_MEANINGFUL_CONTINUOUS_QTY;
+}
 
 export function calculateMacroCalories(pOrObj, carbs, fat) {
   if (typeof pOrObj === 'object' && pOrObj !== null) {
@@ -137,17 +163,25 @@ export function extractResults(raw, customState = state) {
   const meals = customState?.meals || state.meals;
   const actuals = customState?.actuals || state.actuals || {};
   const eatenItems = customState?.eatenItems || state.eatenItems || {};
-  const ingredients = (customState?.ingredients || state.ingredients).map((ing) => ({
-    ...ing,
-    id: ensureIngredientId(ing, customState?.ingredients || state.ingredients),
-    servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
-    calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : Number(ing.calories),
-    protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : Number(ing.protein),
-    carbs: (ing.carbs === '' || typeof ing.carbs === 'undefined') ? 0 : Number(ing.carbs),
-    fat: (ing.fat === '' || typeof ing.fat === 'undefined') ? 0 : Number(ing.fat),
-    minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : Number(ing.minServings),
-    maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : Number(ing.maxServings)
-  }));
+  const ingredients = (customState?.ingredients || state.ingredients).map((ing) => {
+    const resolveNutrient = (nutrient) => {
+      const p = getPlanningValue(nutrient, ing);
+      if (p !== null) return p;
+      const v = ing[nutrient];
+      return (v === '' || typeof v === 'undefined' || v === null) ? 0 : Number(v);
+    };
+    return {
+      ...ing,
+      id: ensureIngredientId(ing, customState?.ingredients || state.ingredients),
+      servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
+      calories: resolveNutrient('calories'),
+      protein: resolveNutrient('protein'),
+      carbs: resolveNutrient('carbs'),
+      fat: resolveNutrient('fat'),
+      minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : Number(ing.minServings),
+      maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : Number(ing.maxServings)
+    };
+  });
 
   const mealResults = meals.map((meal, j) => {
     const items = [];
@@ -220,6 +254,12 @@ export function extractResults(raw, customState = state) {
         if (s > PRECISION.SERVING_MIN_EPS) {
           const plannedQuantity = s * ing.servingSize;
           const displayQuantity = plannedQuantity;
+
+          // Exclude meaningless solver-generated micro-servings (e.g. 0g, 1g, or discrete < 1)
+          if (!isMeaningfulSolverQuantity(plannedQuantity, ing.unit, ing.quantityMode)) {
+            return;
+          }
+
           const itemCal = s * ing.calories;
           const itemPro = s * ing.protein;
           const itemCarb = s * ing.carbs;
@@ -364,17 +404,25 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
   const actuals = customState.actuals || {};
   const eatenItems = customState.eatenItems || {};
 
-  const ingredients = (customState.ingredients || state.ingredients).map((ing) => ({
-    ...ing,
-    id: ensureIngredientId(ing, customState.ingredients || state.ingredients),
-    servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
-    calories: (ing.calories === '' || typeof ing.calories === 'undefined') ? 0 : Number(ing.calories),
-    protein: (ing.protein === '' || typeof ing.protein === 'undefined') ? 0 : Number(ing.protein),
-    carbs: (ing.carbs === '' || typeof ing.carbs === 'undefined') ? 0 : Number(ing.carbs),
-    fat: (ing.fat === '' || typeof ing.fat === 'undefined') ? 0 : Number(ing.fat),
-    minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : Number(ing.minServings),
-    maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : Number(ing.maxServings)
-  }));
+  const ingredients = (customState.ingredients || state.ingredients).map((ing) => {
+    const resolveNutrient = (nutrient) => {
+      const p = getPlanningValue(nutrient, ing);
+      if (p !== null) return p;
+      const v = ing[nutrient];
+      return (v === '' || typeof v === 'undefined' || v === null) ? 0 : Number(v);
+    };
+    return {
+      ...ing,
+      id: ensureIngredientId(ing, customState.ingredients || state.ingredients),
+      servingSize: (ing.servingSize === '' || typeof ing.servingSize === 'undefined') ? 100 : Number(ing.servingSize),
+      calories: resolveNutrient('calories'),
+      protein: resolveNutrient('protein'),
+      carbs: resolveNutrient('carbs'),
+      fat: resolveNutrient('fat'),
+      minServings: (ing.minServings === '' || typeof ing.minServings === 'undefined') ? 0 : Number(ing.minServings),
+      maxServings: (ing.maxServings === '' || typeof ing.maxServings === 'undefined') ? 5 : Number(ing.maxServings)
+    };
+  });
 
   const macros = ['calories', 'protein', 'carbs', 'fat'];
   const mw = [weights.calories, weights.protein, weights.carbs, weights.fat];

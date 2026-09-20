@@ -43,6 +43,7 @@ import {
 } from '../src/core/state.js';
 import {
   createCustomFoodFromIngredient,
+  recordPartialConsumption,
   getRemainingTargets
 } from '../src/core/customFoods.js';
 import {
@@ -575,6 +576,71 @@ export function runMeasuredFoodsTestSuite() {
     global.document = prevDoc;
     console.log('[PASS] Rendering Immutability Tests');
   }
+
+  // ── TEST: Partial Consumption Cumulative Tracking & Invariants ──
+  {
+    resetTestState();
+    const breadId = '7F9K';
+    state.ingredients = [
+      { id: breadId, name: 'Texas Toast', servingSize: 28, unit: 'g', calories: 80, protein: 2, carbs: 13, fat: 2 }
+    ];
+    const createRes = createCustomFoodFromIngredient(breadId, 100, 'g', state);
+    assert.strictEqual(createRes.errors.length, 0, 'Must create food without errors');
+    const food = createRes.entry;
+
+    assert.strictEqual(food.amountLogged, 100, 'Initial amountLogged is 100');
+    assert.strictEqual(food.amountEaten, 100, 'Initial amountEaten is 100');
+    assert.strictEqual(food.amountRemaining, 0, 'Initial amountRemaining is 0');
+    assert.strictEqual(food.isEaten, true, 'Initial isEaten is true');
+
+    // Partial consumption: 40 g eaten
+    const partRes = recordPartialConsumption(food.id, 40, state);
+    assert.strictEqual(partRes.errors.length, 0, 'No errors on recording 40g eaten');
+    assert.strictEqual(food.amountLogged, 100, 'amountLogged remains 100');
+    assert.strictEqual(food.amountEaten, 40, 'amountEaten becomes 40');
+    assert.strictEqual(food.amountRemaining, 60, 'amountRemaining becomes 60');
+    assert.strictEqual(food.eatenQuantity, 40, 'eatenQuantity is 40');
+    assert.strictEqual(food.isEaten, false, 'isEaten becomes false');
+
+    // Cumulative update: 40 g -> 70 g (replaces cumulative, NOT 110 g)
+    const updateRes = recordPartialConsumption(food.id, 70, state);
+    assert.strictEqual(updateRes.errors.length, 0, 'No errors updating to 70g');
+    assert.strictEqual(food.amountLogged, 100, 'amountLogged remains 100');
+    assert.strictEqual(food.amountEaten, 70, 'amountEaten is 70 (not 110)');
+    assert.strictEqual(food.amountRemaining, 30, 'amountRemaining is 30');
+    assert.strictEqual(food.eatenQuantity, 70, 'eatenQuantity is 70');
+    assert.strictEqual(food.isEaten, false, 'isEaten is false');
+
+    // Negative / invalid eaten amounts rejected
+    const badRes = recordPartialConsumption(food.id, -10, state);
+    assert.ok(badRes.errors.length > 0, 'Negative eaten quantity must be rejected');
+
+    console.log('[PASS] Partial Consumption Cumulative Tracking Tests');
+  }
+
+  // ── TEST: Monochrome Preview Styling Invariant ──
+  {
+    const cssPath = path.resolve(__dirname, '../styles/components/custom-foods.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf8');
+
+    // Extract .measured-food-preview block
+    const previewMatch = cssContent.match(/\.measured-food-preview\s*\{([^}]+)\}/);
+    assert.ok(previewMatch, '.measured-food-preview class must exist in custom-foods.css');
+    const previewStyles = previewMatch[1];
+
+    // Must NOT contain blue RGB or hex colors
+    assert.ok(!previewStyles.includes('59, 130, 246'), 'Must not contain blue rgba(59, 130, 246)');
+    assert.ok(!previewStyles.includes('37, 99, 235'), 'Must not contain blue rgba(37, 99, 235)');
+    assert.ok(!previewStyles.includes('#3b82f6'), 'Must not contain hex blue #3b82f6');
+
+    // Must contain monochrome design tokens
+    assert.ok(previewStyles.includes('var(--bg2') || previewStyles.includes('rgba(40, 40, 40'), 'Must use monochrome --bg2');
+    assert.ok(previewStyles.includes('var(--border-hi') || previewStyles.includes('rgba(255, 255, 255'), 'Must use monochrome --border-hi');
+
+    console.log('[PASS] Monochrome Preview Styling Invariant Tests');
+  }
+
+  resetTestState();
 
   console.log('═══════════════════════════════════════════════════════════════════');
   console.log(' ALL MEASURED FOODS TESTS PASSED (0 failures)                     ');

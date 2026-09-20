@@ -31,7 +31,7 @@ import {
   aggregateIngredients,
   calculateConsumption
 } from '../core/consumption.js';
-import { formatPercent } from '../core/formatters.js';
+import { formatPercent, formatDeltaJ } from '../core/formatters.js';
 
 
 
@@ -2185,7 +2185,7 @@ export const UI = {
           <div class="nutrition-hero-card nutrition-empty-card">
             <div class="nutrition-hero-header">
               <span class="nutrition-hero-label">AVERAGE DAILY CALORIES</span>
-              <span class="nutrition-days-badge">0 / ${activeNutritionWindowDays} <span class="dim-sub">days logged</span></span>
+              <span class="nutrition-days-badge">${activeNutritionWindowDays}-day window · 0 logged days</span>
             </div>
             <div class="nutrition-hero-val"><span class="dim-dash">—</span></div>
             <div class="nutrition-hero-empty-msg">No intake snapshots in this period</div>
@@ -2287,7 +2287,7 @@ export const UI = {
           <div class="nutrition-hero-card">
             <div class="nutrition-hero-header">
               <span class="nutrition-hero-label">AVERAGE DAILY CALORIES</span>
-              <span class="nutrition-days-badge">${intakeStats.distinctDays} / ${activeNutritionWindowDays} <span class="dim-sub">days logged</span></span>
+              <span class="nutrition-days-badge">${activeNutritionWindowDays}-day window · ${intakeStats.distinctDays} logged day${intakeStats.distinctDays === 1 ? '' : 's'}</span>
             </div>
             <div class="nutrition-hero-primary-row">
               <div class="nutrition-hero-val-wrap">
@@ -2401,7 +2401,7 @@ export const UI = {
           <div class="card nutrition-breakdown-card">
             <div class="nutrition-breakdown-header">
               <span class="nutrition-breakdown-title">STATISTICAL BREAKDOWN</span>
-              <span class="history-count-badge">${intakeStats.distinctDays} / ${activeNutritionWindowDays} days</span>
+              <span class="history-count-badge">${activeNutritionWindowDays}-day window · ${intakeStats.distinctDays} logged day${intakeStats.distinctDays === 1 ? '' : 's'}</span>
             </div>
             <div class="table-responsive">
               <table class="history-table nutrition-table">
@@ -2840,7 +2840,7 @@ export const UI = {
                 <span class="recommend-rank-badge">#${idx + 1}</span>
                 <span class="recommend-type-badge ${typeClass}">${esc(typeLabel)}</span>
               </div>
-              <span class="recommend-score-pill" title="Raw objective improvement: +${rec.objectiveImprovement.toFixed(6)} ΔJ (${visualScorePct}% visual impact score)">${rec.objectiveImprovement >= 0 ? '+' : ''}${rec.objectiveImprovement.toFixed(3)} ΔJ (${visualScorePct}%)</span>
+              <span class="recommend-score-pill" title="Raw objective improvement: +${rec.objectiveImprovement.toFixed(6)} ΔJ (${visualScorePct}% visual impact score)">${formatDeltaJ(rec.objectiveImprovement, visualScorePct)}</span>
             </div>
 
             <div class="recommend-card-title">${actionTitle}</div>

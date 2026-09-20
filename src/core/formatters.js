@@ -7,10 +7,12 @@ import {
   calculateMovingAverage,
   calculateWeightTrend,
   calculateIntakeStats,
+  calculateNutritionalTrendComparison,
   getLocalDateString,
   getWeightObservations,
   getCombinedHistoryRows
 } from './stats.js';
+import { PRECISION } from './precision.js';
 
 /**
  * Formats macro values on ingredient line items (e.g. 31, 4.5, 0, 3.6, 63).
@@ -97,6 +99,41 @@ export function formatMacroDeviation(absDev, pctDev) {
 
   const pctStr = formatPercent(pctDev, 1, true);
   return `(${absStr}, ${pctStr})`;
+}
+
+/**
+ * Formats Delta J (ΔJ) objective improvement and optional percentage for presentation.
+ * Uses PRECISION.DELTA_J_MIN_DISPLAY (0.005) and PRECISION.NUMERICAL_ZERO_EPS (1e-6)
+ * to suppress negligible floating-point noise and misleading "+0.001 ΔJ (0%)" displays
+ * in favor of neutral "≈ 0" indicators.
+ *
+ * @param {number|null|undefined} deltaJ - Objective improvement value
+ * @param {number|string|null} [scorePct=null] - Optional score percentage
+ * @returns {string} Formatted Delta J string (e.g. "≈ 0", "+0.050 ΔJ (12%)", "-0.050 ΔJ")
+ */
+export function formatDeltaJ(deltaJ, scorePct = null) {
+  if (deltaJ === null || deltaJ === undefined || isNaN(deltaJ)) {
+    return '≈ 0';
+  }
+  const absDelta = Math.abs(deltaJ);
+  if (absDelta < PRECISION.NUMERICAL_ZERO_EPS || absDelta < PRECISION.DELTA_J_MIN_DISPLAY) {
+    return '≈ 0';
+  }
+  if (scorePct !== null && scorePct !== undefined) {
+    const numPct = typeof scorePct === 'number' ? scorePct : parseFloat(scorePct);
+    if (!isNaN(numPct) && Math.abs(Math.round(numPct)) === 0) {
+      return '≈ 0';
+    }
+  }
+  const sign = deltaJ > 0 ? '+' : '-';
+  const valStr = `${sign}${absDelta.toFixed(3)} ΔJ`;
+  if (scorePct !== null && scorePct !== undefined) {
+    const numPct = typeof scorePct === 'number' ? scorePct : parseFloat(scorePct);
+    if (!isNaN(numPct)) {
+      return `${valStr} (${Math.round(numPct)}%)`;
+    }
+  }
+  return valStr;
 }
 
 /**
@@ -549,6 +586,57 @@ export function formatWeightTrendAndHistorySummary({
 
     lines.push([displayDate, wStr, calStr, proStr, carbStr, fatStr].join('\t'));
   }
+
+  return lines.join('\n');
+}
+
+/**
+ * Formats a plain-text comparison between two aligned calendar windows.
+ * Distinguishes calendar days from logged observations.
+ *
+ * @param {Object} trendOrIntakeHistory - calculateNutritionalTrendComparison result or intake history
+ * @param {Object} [options={}] - Options passed to calculateNutritionalTrendComparison if history given
+ * @returns {string} Plain-text trend comparison summary
+ */
+export function formatNutritionalTrendComparison(trendOrIntakeHistory, options = {}) {
+  let trend = trendOrIntakeHistory;
+  if (trend && !trend.windows && typeof trend === 'object') {
+    trend = calculateNutritionalTrendComparison(trendOrIntakeHistory, options);
+  }
+  if (!trend || !trend.windows) return '';
+
+  const W = trend.calendarDays;
+  const lines = [
+    `${W}-DAY COMPARISON`,
+    '',
+    `Current:  ${trend.current.startDate} to ${trend.current.endDate} (${trend.current.loggedDays} logged day${trend.current.loggedDays === 1 ? '' : 's'})`,
+    `Previous: ${trend.previous.startDate} to ${trend.previous.endDate} (${trend.previous.loggedDays} logged day${trend.previous.loggedDays === 1 ? '' : 's'})`,
+    ''
+  ];
+
+  const nutrients = [
+    { key: 'calories', label: 'Calories', unit: 'kcal' },
+    { key: 'protein', label: 'Protein', unit: 'g' },
+    { key: 'carbs', label: 'Carbs', unit: 'g' },
+    { key: 'fat', label: 'Fat', unit: 'g' }
+  ];
+
+  nutrients.forEach(n => {
+    const d = trend.deltas?.[n.key];
+    const curMean = trend.current.stats[n.key]?.mean;
+    const prevMean = trend.previous.stats[n.key]?.mean;
+    const curStr = curMean !== null && !isNaN(curMean) ? `${Math.round(curMean)} ${n.unit}` : '—';
+    const prevStr = prevMean !== null && !isNaN(prevMean) ? `${Math.round(prevMean)} ${n.unit}` : '—';
+    let deltaStr = '—';
+    if (d && d.deltaMean !== null && !isNaN(d.deltaMean)) {
+      const sign = d.deltaMean > 0 ? '+' : '';
+      const pctStr = d.percentChange !== null && !isNaN(d.percentChange)
+        ? ` (${formatPercent(d.percentChange, 1, true)})`
+        : '';
+      deltaStr = `${sign}${d.deltaMean.toFixed(1)} ${n.unit}${pctStr}`;
+    }
+    lines.push(`${n.label.padEnd(10)} Current: ${curStr} | Previous: ${prevStr} | Change: ${deltaStr}`);
+  });
 
   return lines.join('\n');
 }
