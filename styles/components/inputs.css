@@ -672,6 +672,12 @@ label {
   gap: 10px;
 }
 
+.weight-grid .weight-field:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  align-items: center;
+  text-align: center;
+}
+
 .weight-field {
   display: flex;
   flex-direction: column;

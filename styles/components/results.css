@@ -809,7 +809,7 @@
 }
 
 .rate-positive {
-  color: #f2a65a;
+  color: #b05050;
 }
 
 .dim-dash {
@@ -872,19 +872,19 @@
 
 .hac-table-header {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1.4fr;
+  grid-template-columns: 1.1fr 1.2fr 1.2fr;
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 1.2px;
   color: var(--dim);
   text-transform: uppercase;
-  padding: 0 4px 4px 4px;
+  padding: 0 10px 4px 10px;
 }
 
 .hac-table-row {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1.4fr;
+  grid-template-columns: 1.1fr 1.2fr 1.2fr;
   align-items: center;
   background: rgba(255, 255, 255, 0.02);
   padding: 8px 10px;
@@ -913,11 +913,12 @@
   background: rgba(255, 255, 255, 0.04);
   padding: 1px 5px;
   border-radius: 3px;
+  margin-right: 6px;
 }
 
 .hac-lag-tag.tag-capped {
-  color: #f2a65a;
-  border: 1px solid rgba(242, 166, 90, 0.2);
+  color: var(--white);
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .hac-col-se {
