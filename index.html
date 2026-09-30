@@ -62,27 +62,35 @@
       <!-- 1. DAILY TARGETS -->
       <section class="section" id="targets-section">
         <div class="section-header">Daily Targets</div>
-        <div class="card">
-          <div class="target-grid" id="target-fields"></div>
+        <div class="section-content">
+          <div class="section-content-inner">
+            <div class="card">
+              <div class="target-grid" id="target-fields"></div>
+            </div>
+          </div>
         </div>
       </section>
 
       <!-- 2. MEALS -->
       <section class="section" id="meals-section">
         <div class="section-header">Meals</div>
-        <div class="card">
-          <div class="meal-count-row">
-            <label for="meal-count-display">Count</label>
-            <div class="stepper-wrap">
-              <button type="button" class="stepper-btn" id="meal-count-dec" aria-label="Decrease meal count">−</button>
-              <span class="stepper-value" id="meal-count-display">3</span>
-              <button type="button" class="stepper-btn" id="meal-count-inc" aria-label="Increase meal count">+</button>
+        <div class="section-content">
+          <div class="section-content-inner">
+            <div class="card">
+              <div class="meal-count-row">
+                <label for="meal-count-display">Count</label>
+                <div class="stepper-wrap">
+                  <button type="button" class="stepper-btn" id="meal-count-dec" aria-label="Decrease meal count">−</button>
+                  <span class="stepper-value" id="meal-count-display">3</span>
+                  <button type="button" class="stepper-btn" id="meal-count-inc" aria-label="Increase meal count">+</button>
+                </div>
+              </div>
+              <div id="meal-rows"></div>
+              <div class="meal-total-row">
+                <span class="meal-total-label">Total</span>
+                <span class="meal-total-value" id="meal-total-value">100.0%</span>
+              </div>
             </div>
-          </div>
-          <div id="meal-rows"></div>
-          <div class="meal-total-row">
-            <span class="meal-total-label">Total</span>
-            <span class="meal-total-value" id="meal-total-value">100.0%</span>
           </div>
         </div>
       </section>
@@ -90,8 +98,12 @@
       <!-- 3. OPTIMIZATION & WEIGHTS -->
       <section class="section" id="weights-section">
         <div class="section-header">Optimization Weights & Limits</div>
-        <div class="card">
-          <div class="weight-grid" id="weight-fields"></div>
+        <div class="section-content">
+          <div class="section-content-inner">
+            <div class="card">
+              <div class="weight-grid" id="weight-fields"></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -101,13 +113,17 @@
           <span>Custom Foods & Meals</span>
           <span class="custom-foods-count-badge" id="custom-foods-count">0</span>
         </div>
-        <div class="card custom-foods-card">
-          <div id="custom-foods-list" class="custom-foods-list"></div>
-          <div id="custom-foods-totals-container" class="custom-foods-totals-container hidden"></div>
-          <div id="custom-food-form-wrap" class="custom-food-form-wrap hidden"></div>
-          <div class="custom-food-actions" id="custom-food-main-actions">
-            <button type="button" class="btn custom-food-add-trigger" id="add-custom-food-btn">+ Custom Food</button>
-            <button type="button" class="btn btn-cf-remove-all hidden" id="remove-all-custom-foods-btn">Remove All</button>
+        <div class="section-content">
+          <div class="section-content-inner">
+            <div class="card custom-foods-card">
+              <div id="custom-foods-list" class="custom-foods-list"></div>
+              <div id="custom-foods-totals-container" class="custom-foods-totals-container hidden"></div>
+              <div id="custom-food-form-wrap" class="custom-food-form-wrap hidden"></div>
+              <div class="custom-food-actions" id="custom-food-main-actions">
+                <button type="button" class="btn custom-food-add-trigger" id="add-custom-food-btn">+ Custom Food</button>
+                <button type="button" class="btn btn-cf-remove-all hidden" id="remove-all-custom-foods-btn">Remove All</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -117,29 +133,33 @@
         <div class="section-header">
           <span>Log Measured Ingredient</span>
         </div>
-        <div class="card measured-food-card">
-          <div class="measured-food-inputs">
-            <div class="field-group">
-              <label for="measured-food-id-input">Ingredient ID</label>
-              <input type="text" id="measured-food-id-input" placeholder="e.g. 7F9K" autocomplete="off" spellcheck="false" />
-            </div>
-            <div class="field-group">
-              <label for="measured-food-amount-input">Amount</label>
-              <div class="amount-unit-row">
-                <input type="number" id="measured-food-amount-input" min="0" step="any" placeholder="34" inputmode="decimal" />
-                <select id="measured-food-unit-select" class="unit-select">
-                  <option value="g" selected>g</option>
-                  <option value="mL">mL</option>
-                </select>
+        <div class="section-content">
+          <div class="section-content-inner">
+            <div class="card measured-food-card">
+              <div class="measured-food-inputs">
+                <div class="field-group">
+                  <label for="measured-food-id-input">Ingredient ID</label>
+                  <input type="text" id="measured-food-id-input" placeholder="e.g. 7F9K" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="field-group">
+                  <label for="measured-food-amount-input">Amount</label>
+                  <div class="amount-unit-row">
+                    <input type="number" id="measured-food-amount-input" min="0" step="any" placeholder="34" inputmode="decimal" />
+                    <select id="measured-food-unit-select" class="unit-select">
+                      <option value="g" selected>g</option>
+                      <option value="mL">mL</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div id="measured-food-preview" class="measured-food-preview hidden"></div>
+              <div id="measured-food-error" class="measured-food-error hidden"></div>
+
+              <div class="measured-food-actions">
+                <button type="button" class="btn btn-primary" id="add-measured-food-btn">Add Measured Food</button>
               </div>
             </div>
-          </div>
-
-          <div id="measured-food-preview" class="measured-food-preview hidden"></div>
-          <div id="measured-food-error" class="measured-food-error hidden"></div>
-
-          <div class="measured-food-actions">
-            <button type="button" class="btn btn-primary" id="add-measured-food-btn">Add Measured Food</button>
           </div>
         </div>
       </section>
@@ -165,13 +185,17 @@
             <button type="button" class="btn btn-sm" id="copy-summary-btn">Copy</button>
           </div>
         </div>
-        <div class="plan-adjustment-card hidden" id="custom-food-infeasible-notice"></div>
-        <div id="meal-result-cards"></div>
-        <div id="unassigned-custom-cards"></div>
-        <div id="consumption-container" class="consumption-container hidden"></div>
-        <div id="daily-summary"></div>
-        <div class="approx-notice hidden" id="approx-notice"></div>
-        <div id="solver-debug-container" class="solver-debug-container"></div>
+        <div class="section-content">
+          <div class="section-content-inner">
+            <div class="plan-adjustment-card hidden" id="custom-food-infeasible-notice"></div>
+            <div id="meal-result-cards"></div>
+            <div id="unassigned-custom-cards"></div>
+            <div id="consumption-container" class="consumption-container hidden"></div>
+            <div id="daily-summary"></div>
+            <div class="approx-notice hidden" id="approx-notice"></div>
+            <div id="solver-debug-container" class="solver-debug-container"></div>
+          </div>
+        </div>
       </section>
 
     </div>

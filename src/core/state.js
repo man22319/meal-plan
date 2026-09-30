@@ -11,6 +11,8 @@ export const WEIGHT_KEY = 'macroSolver_weights';
 export const INTAKE_KEY = 'macroSolver_intake';
 export const CUSTOM_FOODS_KEY = 'macroSolver_customFoods';
 export const CONSUMPTION_KEY = 'macroSolver_ateSoFar';
+export const COLLAPSE_KEY = 'macroSolver_sectionCollapse';
+export const COLLAPSE_KEY_PREFIX = 'macroSolver_collapse_';
 
 export function generateId(prefix = 'id') {
   return `${prefix}_${Math.random().toString(36).substring(2, 8)}_${Date.now().toString(36)}`;

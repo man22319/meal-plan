@@ -1,4 +1,4 @@
-import { resolveAvailability, state, generateIngredientId, generateStateFingerprint, ensureIngredientId, findIngredientById } from '../core/state.js';
+import { resolveAvailability, state, generateIngredientId, generateStateFingerprint, ensureIngredientId, findIngredientById, COLLAPSE_KEY, COLLAPSE_KEY_PREFIX } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 import { Optimization } from '../core/solver.js';
 import { bindPressAndHold } from './pressHold.js';
@@ -1758,59 +1758,86 @@ export const UI = {
       `;
     }).join('');
 
+    const consumptionCollapsed = UI.getCollapseState('consumption-container');
     container.innerHTML = `
-      <div class="consumption-card">
-        <div class="consumption-header-row">
+      <div class="consumption-card${consumptionCollapsed ? ' collapsed' : ''}">
+        <div class="consumption-header-row collapsible">
           <div class="consumption-title-wrap">
             <div class="consumption-title">Consolidated Consumption</div>
             <div class="consumption-sub">Track actual food eaten across all meal allocations</div>
           </div>
         </div>
 
-        <div class="remaining-hero-banner">
-          <div class="remaining-hero-header">
-            <span class="remaining-hero-title">Remaining Today</span>
-            <span class="remaining-hero-sub">Eaten: ${Math.round(eatTotals.calories)} kcal | ${eatTotals.protein.toFixed(1)}P | ${eatTotals.carbs.toFixed(1)}C | ${eatTotals.fat.toFixed(1)}F</span>
-          </div>
-          <div class="remaining-macro-grid">
-            <div class="remaining-macro-pill">
-              <span class="remaining-macro-label">Calories</span>
-              <span class="remaining-macro-val">${Math.round(remTotals.calories)} <span class="unit">kcal</span></span>
+        <div class="consumption-content">
+          <div class="consumption-content-inner">
+            <div class="remaining-hero-banner">
+              <div class="remaining-hero-header">
+                <span class="remaining-hero-title">Remaining Today</span>
+                <span class="remaining-hero-sub">Eaten: ${Math.round(eatTotals.calories)} kcal | ${eatTotals.protein.toFixed(1)}P | ${eatTotals.carbs.toFixed(1)}C | ${eatTotals.fat.toFixed(1)}F</span>
+              </div>
+              <div class="remaining-macro-grid">
+                <div class="remaining-macro-pill">
+                  <span class="remaining-macro-label">Calories</span>
+                  <span class="remaining-macro-val">${Math.round(remTotals.calories)} <span class="unit">kcal</span></span>
+                </div>
+                <div class="remaining-macro-pill">
+                  <span class="remaining-macro-label">Protein</span>
+                  <span class="remaining-macro-val">${remTotals.protein.toFixed(1)} <span class="unit">g</span></span>
+                </div>
+                <div class="remaining-macro-pill">
+                  <span class="remaining-macro-label">Carbs</span>
+                  <span class="remaining-macro-val">${remTotals.carbs.toFixed(1)} <span class="unit">g</span></span>
+                </div>
+                <div class="remaining-macro-pill">
+                  <span class="remaining-macro-label">Fat</span>
+                  <span class="remaining-macro-val">${remTotals.fat.toFixed(1)} <span class="unit">g</span></span>
+                </div>
+              </div>
             </div>
-            <div class="remaining-macro-pill">
-              <span class="remaining-macro-label">Protein</span>
-              <span class="remaining-macro-val">${remTotals.protein.toFixed(1)} <span class="unit">g</span></span>
-            </div>
-            <div class="remaining-macro-pill">
-              <span class="remaining-macro-label">Carbs</span>
-              <span class="remaining-macro-val">${remTotals.carbs.toFixed(1)} <span class="unit">g</span></span>
-            </div>
-            <div class="remaining-macro-pill">
-              <span class="remaining-macro-label">Fat</span>
-              <span class="remaining-macro-val">${remTotals.fat.toFixed(1)} <span class="unit">g</span></span>
-            </div>
-          </div>
-        </div>
 
-        <div class="consumption-table-wrap">
-          <table class="consumption-table">
-            <thead>
-              <tr>
-                <th>Ingredient</th>
-                <th>Planned</th>
-                <th>Ate So Far</th>
-                <th>Remaining</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rowsHTML}
-            </tbody>
-          </table>
+            <div class="consumption-table-wrap">
+              <table class="consumption-table">
+                <thead>
+                  <tr>
+                    <th>Ingredient</th>
+                    <th>Planned</th>
+                    <th>Ate So Far</th>
+                    <th>Remaining</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rowsHTML}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     `;
 
     container.classList.remove('hidden');
+
+    // Consumption card collapse toggle
+    const consumptionHeader = container.querySelector('.consumption-header-row.collapsible');
+    if (consumptionHeader) {
+      consumptionHeader.setAttribute('role', 'button');
+      consumptionHeader.setAttribute('tabindex', '0');
+      consumptionHeader.setAttribute('aria-expanded', consumptionCollapsed ? 'false' : 'true');
+
+      consumptionHeader.addEventListener('click', (e) => {
+        // Don't collapse if clicking on an interactive element inside the header
+        if (e.target.closest('button, input, select, a')) return;
+        UI.toggleSectionCollapse('consumption-container');
+      });
+
+      consumptionHeader.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          if (e.target.closest('button, input, select, a')) return;
+          e.preventDefault();
+          UI.toggleSectionCollapse('consumption-container');
+        }
+      });
+    }
 
     container.querySelectorAll('.btn-apply-eaten').forEach(btn => {
       btn.addEventListener('click', function () {
@@ -3089,6 +3116,175 @@ export const UI = {
         // Re-analyze on new state
         UI.runRecommendationAnalysis();
       });
+    });
+  },
+
+  // ── COLLAPSIBLE SECTIONS ──
+
+  /**
+   * Major section identifiers that support independent expand/collapse.
+   * Maps to the 7 major sections/badges in FIXME/ISSUES_1.md:
+   * 1. DAILY TARGETS: 'targets-section'
+   * 2. MEALS: 'meals-section'
+   * 3. OPTIMIZATION & LIMITS: 'weights-section'
+   * 4. CUSTOM FOODS & MEALS: 'custom-foods-section'
+   * 5. LOG MEASURED INGREDIENT: 'measured-food-section'
+   * 6. RESULTS: 'results-section'
+   * 7. CONSOLIDATED CONSUMPTION: 'consumption-container'
+   */
+  COLLAPSIBLE_SECTION_IDS: [
+    'targets-section',
+    'meals-section',
+    'weights-section',
+    'custom-foods-section',
+    'measured-food-section',
+    'results-section',
+    'consumption-container'
+  ],
+
+  /**
+   * Read the persisted collapse state for a section (true = collapsed, false = expanded).
+   * Sensible default for first-time use: false (all sections expanded).
+   * Checks the independent per-section localStorage key first, then falls back to aggregate key.
+   */
+  getCollapseState(sectionId) {
+    try {
+      const val = localStorage.getItem(`${COLLAPSE_KEY_PREFIX}${sectionId}`);
+      if (val !== null) {
+        return val === 'true' || val === '1' || val === 'collapsed';
+      }
+      const raw = localStorage.getItem(COLLAPSE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && sectionId in parsed) {
+          return Boolean(parsed[sectionId]);
+        }
+      }
+    } catch { /* storage unavailable */ }
+    return false;
+  },
+
+  /**
+   * Set collapse state for a section and persist across reloads and sessions.
+   * Persists to both the section's independent key and the aggregate key.
+   */
+  setCollapseState(sectionId, isCollapsed) {
+    try {
+      localStorage.setItem(`${COLLAPSE_KEY_PREFIX}${sectionId}`, isCollapsed ? 'true' : 'false');
+      let agg = {};
+      try {
+        const raw = localStorage.getItem(COLLAPSE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') agg = parsed;
+        }
+      } catch {}
+      if (isCollapsed) {
+        agg[sectionId] = true;
+      } else {
+        delete agg[sectionId];
+      }
+      localStorage.setItem(COLLAPSE_KEY, JSON.stringify(agg));
+    } catch { /* quota exceeded or private mode */ }
+  },
+
+  /**
+   * Toggle a section's collapse state, update DOM attributes and persist.
+   * Returns the new collapsed boolean.
+   */
+  toggleSectionCollapse(sectionId) {
+    if (sectionId === 'consumption-container') {
+      const card = document.querySelector('#consumption-container .consumption-card');
+      const header = document.querySelector('#consumption-container .consumption-header-row');
+      if (!card) return false;
+      const isCollapsed = card.classList.toggle('collapsed');
+      if (header) header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+      UI.setCollapseState(sectionId, isCollapsed);
+      return isCollapsed;
+    }
+
+    const section = document.getElementById(sectionId);
+    if (!section) return false;
+    const isCollapsed = section.classList.toggle('collapsed');
+    const header = section.querySelector('.section-header');
+    if (header) header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+    UI.setCollapseState(sectionId, isCollapsed);
+    return isCollapsed;
+  },
+
+  /**
+   * Initialize collapsible behavior on all major sections.
+   * Adds 'collapsible' class, keyboard navigation, and restores persisted collapse states.
+   * Safe to call multiple times (idempotent).
+   */
+  initCollapsibleSections() {
+    UI.COLLAPSIBLE_SECTION_IDS.forEach(sectionId => {
+      if (sectionId === 'consumption-container') return;
+
+      const section = document.getElementById(sectionId);
+      if (!section) return;
+
+      const header = section.querySelector('.section-header');
+      if (!header) return;
+
+      // Ensure content is wrapped in smooth accordion container if not already
+      let content = section.querySelector(':scope > .section-content');
+      if (!content) {
+        content = document.createElement('div');
+        content.className = 'section-content';
+        const inner = document.createElement('div');
+        inner.className = 'section-content-inner';
+        const toMove = Array.from(section.children).filter(el => el !== header && el !== content);
+        toMove.forEach(el => inner.appendChild(el));
+        content.appendChild(inner);
+        section.appendChild(content);
+      }
+
+      if (header.dataset.collapseInit === '1') return;
+      header.dataset.collapseInit = '1';
+
+      header.classList.add('collapsible');
+      header.setAttribute('role', 'button');
+      header.setAttribute('tabindex', '0');
+
+      header.addEventListener('click', (e) => {
+        // Don't toggle when clicking interactive controls (buttons, links, inputs)
+        if (e.target.closest('button, input, select, a')) return;
+        UI.toggleSectionCollapse(sectionId);
+      });
+
+      header.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          if (e.target.closest('button, input, select, a')) return;
+          e.preventDefault();
+          UI.toggleSectionCollapse(sectionId);
+        }
+      });
+    });
+
+    // Restore persisted states
+    UI.restoreCollapseStates();
+  },
+
+  /**
+   * Restore collapse states from localStorage for all collapsible sections.
+   * Called on boot and after dynamic updates.
+   */
+  restoreCollapseStates() {
+    UI.COLLAPSIBLE_SECTION_IDS.forEach(sectionId => {
+      const isCollapsed = UI.getCollapseState(sectionId);
+      if (sectionId === 'consumption-container') {
+        const card = document.querySelector('#consumption-container .consumption-card');
+        const header = document.querySelector('#consumption-container .consumption-header-row');
+        if (card) card.classList.toggle('collapsed', isCollapsed);
+        if (header) header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+      } else {
+        const section = document.getElementById(sectionId);
+        if (!section) return;
+        const header = section.querySelector('.section-header');
+        section.classList.toggle('collapsed', isCollapsed);
+        if (header) header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+      }
     });
   }
 };

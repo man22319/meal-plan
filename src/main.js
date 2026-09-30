@@ -379,4 +379,5 @@ document.addEventListener('DOMContentLoaded', () => {
     UI.renderResults();
   }
   setupEventListeners();
+  UI.initCollapsibleSections();
 });

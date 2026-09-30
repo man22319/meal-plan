@@ -228,6 +228,163 @@ main {
   align-items: center;
 }
 
+/* ── Collapsible Sections ── */
+.section-header.collapsible {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  justify-content: flex-start;
+  gap: 8px;
+  transition: margin-bottom 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.section-header.collapsible:focus-visible {
+  outline: 1px solid var(--accent, rgba(255, 255, 255, 0.4));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.section-header.collapsible .section-header-actions,
+.section-header.collapsible .custom-foods-count-badge {
+  margin-left: auto;
+}
+
+.section-header.collapsible::before {
+  content: '▾';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--dim);
+  width: 14px;
+  flex-shrink: 0;
+  transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), color 0.2s ease;
+}
+
+.section-header.collapsible:hover::before {
+  color: var(--silver);
+}
+
+.section.collapsed > .section-header.collapsible::before {
+  transform: rotate(-90deg);
+}
+
+.section.collapsed .section-header {
+  margin-bottom: 0;
+}
+
+/* Smooth Accordion Animation via CSS Grid */
+.section-content {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+              opacity 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+  opacity: 1;
+}
+
+.section-content-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.section.collapsed .section-content {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Fallback for unnested elements if any */
+.section.collapsed > *:not(.section-header):not(.section-content) {
+  display: none !important;
+}
+
+/* Consumption card collapse */
+.consumption-card {
+  transition: padding-bottom 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.consumption-header-row.collapsible {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: border-bottom-color 0.25s ease, padding-bottom 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.consumption-header-row.collapsible:focus-visible {
+  outline: 1px solid var(--accent, rgba(255, 255, 255, 0.4));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.consumption-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.consumption-title::before {
+  content: '▾';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--dim);
+  width: 14px;
+  flex-shrink: 0;
+  transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), color 0.2s ease;
+}
+
+.consumption-header-row.collapsible:hover .consumption-title::before {
+  color: var(--silver);
+}
+
+.consumption-card.collapsed .consumption-title::before {
+  transform: rotate(-90deg);
+}
+
+.consumption-content {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+              opacity 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+  opacity: 1;
+}
+
+.consumption-content-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.consumption-card.collapsed .consumption-content {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.consumption-card.collapsed {
+  padding-bottom: 12px;
+}
+
+.consumption-card.collapsed .consumption-header-row {
+  border-bottom-color: transparent;
+  padding-bottom: 0;
+}
+
+.consumption-card.collapsed > *:not(.consumption-header-row):not(.consumption-content) {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section-content,
+  .consumption-content,
+  .section-header.collapsible::before,
+  .consumption-title::before,
+  .consumption-card,
+  .consumption-header-row.collapsible {
+    transition: none !important;
+  }
+}
+
 /* ── Cards — glass-style ── */
 .card {
   background: rgba(255, 255, 255, 0.04);
