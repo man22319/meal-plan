@@ -279,6 +279,111 @@ export function formatDailySummary(result, targets = null, customFoods = []) {
   return lines.join('\n');
 }
 
+// ── Shared Nutritional & Statistical Formatting Helpers ──────────────────────────
+
+const COL_W = 14;   // label column width
+const pad  = (s, w = COL_W) => String(s).padEnd(w);
+const sep  = (char = '─', len = 72) => char.repeat(len);
+
+/** Format a numeric value; kcal rounded to integer, macros to 1 dp */
+const fv = (v, isKcal) => {
+  if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) return '—';
+  return isKcal ? Math.round(v).toLocaleString() : Number(v).toFixed(1);
+};
+
+/**
+ * Build a compact stat block for one nutrient.
+ * Returns an array of lines.
+ */
+const buildStatBlock = (label, stat, unit, isKcal = false) => {
+  if (!stat || stat.n === 0 || stat.mean === null) {
+    return [`${pad(label)}n=0  (no data)`];
+  }
+
+  const u   = unit ? ` ${unit}` : '';
+  const obs = stat.n;
+  const mn  = fv(stat.mean,   isKcal);
+  const med = fv(stat.median, isKcal);
+  const sd  = stat.sd !== null ? fv(stat.sd, isKcal) : '—';
+  const mi  = fv(stat.min,  isKcal);
+  const mx  = fv(stat.max,  isKcal);
+  const rng = (stat.min !== null && stat.max !== null)
+    ? `${mi}–${mx}${u}`
+    : '—';
+
+  let diffStr = '—';
+  let pctStr  = '—';
+  let tgtStr  = '—';
+  if (stat.target !== null && stat.difference !== null) {
+    tgtStr  = `${fv(stat.target, isKcal)}${u}`;
+    const sign = stat.difference >= 0 ? '+' : '';
+    diffStr = `${sign}${fv(stat.difference, isKcal)}${u}`;
+    pctStr  = stat.percentDifference !== null
+      ? formatPercent(stat.percentDifference, 2, true)
+      : '—';
+  }
+
+  return [
+    `${pad(label)}n=${obs}  mean=${mn}${u}  median=${med}${u}  SD=${sd}${u}`,
+    `${pad('')}min=${mi}${u}  max=${mx}${u}  range=${rng}`,
+    `${pad('')}target=${tgtStr}  diff=${diffStr}  %diff=${pctStr}`
+  ];
+};
+
+/**
+ * Derive per-observation calorie-from-macro values and compute stats inline.
+ */
+const derivedCalStats = (statsObj, key, kcalPerG) => {
+  const src = statsObj?.[key];
+  if (!src || src.n === 0 || src.mean === null) return null;
+
+  const scale = (v) => (v !== null ? v * kcalPerG : null);
+  const tgt  = src.target !== null ? src.target * kcalPerG : null;
+  const diff = src.difference !== null ? src.difference * kcalPerG : null;
+  const pct  = src.percentDifference;
+
+  return {
+    n:                src.n,
+    mean:             scale(src.mean),
+    median:           scale(src.median),
+    sd:               scale(src.sd),
+    min:              scale(src.min),
+    max:              scale(src.max),
+    target:           tgt,
+    difference:       diff,
+    percentDifference: pct
+  };
+};
+
+/**
+ * Derives macro calorie split lines based on mean intakes.
+ */
+const getMacroSplitLines = (intakeStats) => {
+  if (!intakeStats) return [];
+  const avgC = intakeStats.carbs?.mean  ?? null;
+  const avgF = intakeStats.fat?.mean    ?? null;
+  const avgP = intakeStats.protein?.mean ?? null;
+
+  if (avgC !== null && avgF !== null && avgP !== null) {
+    const kcalC    = avgC * 4;
+    const kcalF    = avgF * 9;
+    const kcalP    = avgP * 4;
+    const kcalTot  = kcalC + kcalF + kcalP;
+    if (kcalTot > 0) {
+      return [
+        sep(),
+        'MACRO CALORIE SPLIT (based on mean intakes)',
+        sep(),
+        `${'Carbs (4 kcal/g)'.padEnd(22)}avg ${fv(kcalC, true)} kcal/day  (${formatPercent((kcalC / kcalTot) * 100, 1)})`,
+        `${'Fat (9 kcal/g)'.padEnd(22)}avg ${fv(kcalF, true)} kcal/day  (${formatPercent((kcalF / kcalTot) * 100, 1)})`,
+        `${'Protein (4 kcal/g)'.padEnd(22)}avg ${fv(kcalP, true)} kcal/day  (${formatPercent((kcalP / kcalTot) * 100, 1)})`,
+        `${'Total from macros'.padEnd(22)}avg ${fv(kcalTot, true)} kcal/day`
+      ];
+    }
+  }
+  return [];
+};
+
 /**
  * Formats a comprehensive plain-text statistical summary of weight trend and nutritional history
  * for clipboard export. Covers ALL logged intake (no window limit) and outputs every
@@ -321,110 +426,8 @@ export function formatWeightAndNutritionSummary({
   // ── Intake stats over ALL history (windowDays = null) ────────────────────────
   const intakeStats = calculateIntakeStats(intakeHistory, null, refDate, targets);
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  const COL_W = 14;   // label column width
-  const pad  = (s, w = COL_W) => String(s).padEnd(w);
-  const sep  = (char = '─', len = 72) => char.repeat(len);
-
-  /** Format a numeric value; kcal rounded to integer, macros to 1 dp */
-  const fv = (v, isKcal) => {
-    if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) return '—';
-    return isKcal ? Math.round(v).toLocaleString() : Number(v).toFixed(1);
-  };
-
-  /**
-   * Build a compact stat block for one nutrient.
-   * Returns an array of lines.
-   */
-  const buildStatBlock = (label, stat, unit, isKcal = false) => {
-    if (!stat || stat.n === 0 || stat.mean === null) {
-      return [`${pad(label)}n=0  (no data)`];
-    }
-
-    const u   = unit ? ` ${unit}` : '';
-    const obs = stat.n;
-    const mn  = fv(stat.mean,   isKcal);
-    const med = fv(stat.median, isKcal);
-    const sd  = stat.sd !== null ? fv(stat.sd, isKcal) : '—';
-    const mi  = fv(stat.min,  isKcal);
-    const mx  = fv(stat.max,  isKcal);
-    const rng = (stat.min !== null && stat.max !== null)
-      ? `${mi}–${mx}${u}`
-      : '—';
-
-    let diffStr = '—';
-    let pctStr  = '—';
-    let tgtStr  = '—';
-    if (stat.target !== null && stat.difference !== null) {
-      tgtStr  = `${fv(stat.target, isKcal)}${u}`;
-      const sign = stat.difference >= 0 ? '+' : '';
-      diffStr = `${sign}${fv(stat.difference, isKcal)}${u}`;
-      pctStr  = stat.percentDifference !== null
-        ? formatPercent(stat.percentDifference, 2, true)
-        : '—';
-    }
-
-    return [
-      `${pad(label)}n=${obs}  mean=${mn}${u}  median=${med}${u}  SD=${sd}${u}`,
-      `${pad('')}min=${mi}${u}  max=${mx}${u}  range=${rng}`,
-      `${pad('')}target=${tgtStr}  diff=${diffStr}  %diff=${pctStr}`
-    ];
-  };
-
-  // ── Calorie-contribution stats ───────────────────────────────────────────────
-  /**
-   * Derive per-observation calorie-from-macro values and compute stats inline.
-   */
-  const derivedCalStats = (key, kcalPerG) => {
-    const src = intakeStats[key];
-    if (!src || src.n === 0 || src.mean === null) return null;
-
-    // Reconstruct the distribution by scaling the raw stats isn't possible without
-    // raw values, so we approximate using the available descriptive stats (mean,
-    // median, SD, min, max are linearly scaled by kcalPerG).
-    const scale = (v) => (v !== null ? v * kcalPerG : null);
-
-    const tgt  = src.target !== null ? src.target * kcalPerG : null;
-    const diff = src.difference !== null ? src.difference * kcalPerG : null;
-    const pct  = src.percentDifference;   // % doesn't change under linear scaling
-
-    return {
-      n:                src.n,
-      mean:             scale(src.mean),
-      median:           scale(src.median),
-      sd:               scale(src.sd),
-      min:              scale(src.min),
-      max:              scale(src.max),
-      target:           tgt,
-      difference:       diff,
-      percentDifference: pct
-    };
-  };
-
   // ── Macro calorie split (based on mean intakes) ──────────────────────────────
-  const avgC = intakeStats.carbs?.mean  ?? null;
-  const avgF = intakeStats.fat?.mean    ?? null;
-  const avgP = intakeStats.protein?.mean ?? null;
-
-  let macroSplitLines = [];
-  if (avgC !== null && avgF !== null && avgP !== null) {
-    const kcalC    = avgC * 4;
-    const kcalF    = avgF * 9;
-    const kcalP    = avgP * 4;
-    const kcalTot  = kcalC + kcalF + kcalP;
-    if (kcalTot > 0) {
-      macroSplitLines = [
-        sep(),
-        'MACRO CALORIE SPLIT (based on mean intakes)',
-        sep(),
-        `${'Carbs (4 kcal/g)'.padEnd(22)}avg ${fv(kcalC, true)} kcal/day  (${formatPercent((kcalC / kcalTot) * 100, 1)})`,
-        `${'Fat (9 kcal/g)'.padEnd(22)}avg ${fv(kcalF, true)} kcal/day  (${formatPercent((kcalF / kcalTot) * 100, 1)})`,
-        `${'Protein (4 kcal/g)'.padEnd(22)}avg ${fv(kcalP, true)} kcal/day  (${formatPercent((kcalP / kcalTot) * 100, 1)})`,
-        `${'Total from macros'.padEnd(22)}avg ${fv(kcalTot, true)} kcal/day`
-      ];
-    }
-  }
+  const macroSplitLines = getMacroSplitLines(intakeStats);
 
   // ── Assemble lines ──────────────────────────────────────────────────────────
   const lines = [
@@ -494,17 +497,17 @@ export function formatWeightAndNutritionSummary({
   // Cals from carbs
   lines.push('');
   lines.push('── CALORIES FROM CARBS ──');
-  buildStatBlock('Cals·Carbs', derivedCalStats('carbs', 4), 'kcal', true).forEach(l => lines.push(l));
+  buildStatBlock('Cals·Carbs', derivedCalStats(intakeStats, 'carbs', 4), 'kcal', true).forEach(l => lines.push(l));
 
   // Cals from fat
   lines.push('');
   lines.push('── CALORIES FROM FAT ──');
-  buildStatBlock('Cals·Fat', derivedCalStats('fat', 9), 'kcal', true).forEach(l => lines.push(l));
+  buildStatBlock('Cals·Fat', derivedCalStats(intakeStats, 'fat', 9), 'kcal', true).forEach(l => lines.push(l));
 
   // Cals from protein
   lines.push('');
   lines.push('── CALORIES FROM PROTEIN ──');
-  buildStatBlock('Cals·Protein', derivedCalStats('protein', 4), 'kcal', true).forEach(l => lines.push(l));
+  buildStatBlock('Cals·Protein', derivedCalStats(intakeStats, 'protein', 4), 'kcal', true).forEach(l => lines.push(l));
 
   // Carbs
   lines.push('');
@@ -691,4 +694,148 @@ export function formatNutritionalTrendComparison(trendOrIntakeHistory, options =
 
   return lines.join('\n');
 }
+
+/**
+ * Formats a plain-text summary of nutritional trend statistics and
+ * comparison across aligned windows for clipboard export.
+ *
+ * @param {Object} [options={}]
+ * @param {Object} [options.intakeHistory={}] - Intake entries keyed by YYYY-MM-DD
+ * @param {Object|null} [options.targets=null] - Daily nutrient targets (calories, protein, carbs, fat)
+ * @param {number} [options.windowDays=7] - Calendar window span in days (e.g. 7, 14, 30)
+ * @param {string|null} [options.referenceDate=null] - Reference end date (YYYY-MM-DD)
+ * @returns {string} Plain-text nutritional trend summary
+ */
+export function formatNutritionalTrendSummary({
+  intakeHistory = {},
+  targets = null,
+  windowDays = 7,
+  referenceDate = null
+} = {}) {
+  const refDate = referenceDate || getLocalDateString();
+  const W = (typeof windowDays === 'number' && windowDays > 0) ? windowDays : 7;
+  const intakeStats = calculateIntakeStats(intakeHistory, W, refDate, targets);
+
+  const lines = [
+    'NUTRITIONAL TREND SUMMARY',
+    ''
+  ];
+
+  if (!intakeStats || intakeStats.distinctDays === 0) {
+    lines.push(sep());
+    lines.push(`${W}-DAY WINDOW · 0 logged days`);
+    lines.push(sep());
+    lines.push('No intake snapshots recorded in this period.');
+    return lines.join('\n');
+  }
+
+  const distinctDays = intakeStats.distinctDays;
+
+  lines.push(sep());
+  lines.push(`DAILY INTAKE STATISTICS (${W}-day calendar window · ${distinctDays} logged day${distinctDays === 1 ? '' : 's'})`);
+  lines.push(sep());
+  lines.push('');
+
+  // Calories
+  lines.push('── CALORIES ──');
+  buildStatBlock('Calories', intakeStats.calories, 'kcal', true).forEach(l => lines.push(l));
+
+  // Energy balance heuristic (matching UI calculation)
+  if (intakeStats.calories?.mean !== null && intakeStats.calories?.target !== null) {
+    const deltaE = intakeStats.calories.difference;
+    if (deltaE !== null && !isNaN(deltaE)) {
+      const deltaWEnergy = (7 * deltaE) / 3500;
+      const signW = deltaWEnergy > 0.001 ? '+' : deltaWEnergy < -0.001 ? '−' : '';
+      lines.push('');
+      lines.push('Energy balance heuristic:');
+      lines.push(`  Theoretical weight change: ${signW}${Math.abs(deltaWEnergy).toFixed(2)} lb/week`);
+      lines.push('  (theoretical 3,500 kcal/lb equivalence; not an estimate of actual tissue gain)');
+    }
+  }
+
+  // Cals from carbs
+  lines.push('');
+  lines.push('── CALORIES FROM CARBS ──');
+  buildStatBlock('Cals·Carbs', derivedCalStats(intakeStats, 'carbs', 4), 'kcal', true).forEach(l => lines.push(l));
+
+  // Cals from fat
+  lines.push('');
+  lines.push('── CALORIES FROM FAT ──');
+  buildStatBlock('Cals·Fat', derivedCalStats(intakeStats, 'fat', 9), 'kcal', true).forEach(l => lines.push(l));
+
+  // Cals from protein
+  lines.push('');
+  lines.push('── CALORIES FROM PROTEIN ──');
+  buildStatBlock('Cals·Protein', derivedCalStats(intakeStats, 'protein', 4), 'kcal', true).forEach(l => lines.push(l));
+
+  // Carbs
+  lines.push('');
+  lines.push('── CARBOHYDRATES ──');
+  buildStatBlock('Carbs', intakeStats.carbs, 'g').forEach(l => lines.push(l));
+
+  // Fat
+  lines.push('');
+  lines.push('── FAT ──');
+  buildStatBlock('Fat', intakeStats.fat, 'g').forEach(l => lines.push(l));
+
+  // Protein
+  lines.push('');
+  lines.push('── PROTEIN ──');
+  buildStatBlock('Protein', intakeStats.protein, 'g').forEach(l => lines.push(l));
+
+  // Macro split
+  const macroSplitLines = getMacroSplitLines(intakeStats);
+  if (macroSplitLines.length > 0) {
+    lines.push('');
+    macroSplitLines.forEach(l => lines.push(l));
+  }
+
+  // ── Aligned Comparison Window Trend Statistics ──
+  const comparisonText = formatNutritionalTrendComparison(intakeHistory, {
+    windowDays: W,
+    referenceDate: refDate,
+    fallbackTargets: targets
+  });
+
+  if (comparisonText) {
+    lines.push('');
+    lines.push(sep());
+    lines.push(`TREND COMPARISON (${W}-DAY ALIGNED WINDOWS)`);
+    lines.push(sep());
+    lines.push(comparisonText);
+  }
+
+  // ── Tab-Separated Statistical Breakdown ──
+  lines.push('');
+  lines.push(sep());
+  lines.push(`STATISTICAL BREAKDOWN (${W}-day window · ${distinctDays} logged day${distinctDays === 1 ? '' : 's'})`);
+  lines.push(sep());
+  lines.push(['METRIC', 'MEAN', 'SD (±)', 'MEDIAN', 'MIN–MAX', 'TARGET', '% DIFF', 'N'].join('\t'));
+
+  const metrics = [
+    { key: 'calories', label: 'CALORIES', unit: 'kcal', isKcal: true },
+    { key: 'carbs', label: 'CARBS', unit: 'g', isKcal: false },
+    { key: 'fat', label: 'FAT', unit: 'g', isKcal: false },
+    { key: 'protein', label: 'PROTEIN', unit: 'g', isKcal: false }
+  ];
+
+  metrics.forEach(m => {
+    const s = intakeStats[m.key];
+    if (!s || s.n === 0 || s.mean === null) {
+      lines.push([m.label, '—', '—', '—', '—', '—', '—', '0'].join('\t'));
+      return;
+    }
+    const mn = `${fv(s.mean, m.isKcal)} ${m.unit}`;
+    const sd = s.sd !== null ? `±${fv(s.sd, m.isKcal)}` : '—';
+    const med = s.median !== null ? `${fv(s.median, m.isKcal)} ${m.unit}` : '—';
+    const rng = (s.min !== null && s.max !== null) ? `${fv(s.min, m.isKcal)}–${fv(s.max, m.isKcal)} ${m.unit}` : '—';
+    const tgt = s.target !== null ? `${fv(s.target, m.isKcal)} ${m.unit}` : '—';
+    const pct = s.percentDifference !== null ? formatPercent(s.percentDifference, 1, true) : '—';
+    lines.push([m.label, mn, sd, med, rng, tgt, pct, String(s.n)].join('\t'));
+  });
+
+  return lines.join('\n');
+}
+
+export const formatNutritionalSummary = formatNutritionalTrendSummary;
 

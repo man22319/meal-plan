@@ -6,6 +6,8 @@ import {
   formatDailySummary,
   formatWeightAndNutritionSummary,
   formatWeightTrendAndHistorySummary,
+  formatNutritionalTrendSummary,
+  formatNutritionalSummary,
   formatPercent,
   formatCalorieDeviation,
   formatMacroDeviation,
@@ -539,6 +541,124 @@ console.log('══════════════════════�
   assert('Test K: Reports previous window dates and 7 logged days', text.includes('Previous: 2026-09-07 to 2026-09-13 (7 logged days)'));
   assert('Test K: Distinguishes calendar span from observation count (no 6/7 fraction)', !text.includes('6/7'));
   assert('Test K: Formats calorie delta with mean and percent', text.includes('+200.0 kcal (+10.0%)'));
+}
+
+// ── TEST L: formatNutritionalTrendSummary Comprehensive Output ──
+{
+  const intakeHistory = {
+    // Current 7-day window (2026-08-19 to 2026-08-25)
+    '2026-08-23': {
+      totals: { calories: 2000, protein: 150, carbs: 200, fat: 50 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    },
+    '2026-08-24': {
+      totals: { calories: 2100, protein: 160, carbs: 210, fat: 55 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    },
+    '2026-08-25': {
+      totals: { calories: 2200, protein: 170, carbs: 220, fat: 60 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    },
+    // Previous 7-day window (2026-08-12 to 2026-08-18)
+    '2026-08-15': {
+      totals: { calories: 1900, protein: 140, carbs: 190, fat: 45 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    },
+    '2026-08-16': {
+      totals: { calories: 1950, protein: 145, carbs: 195, fat: 50 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    }
+  };
+
+  const targets = { calories: 2000, protein: 150, carbs: 200, fat: 50 };
+
+  // 1. Full 7-Day Window Summary
+  const summary7 = formatNutritionalTrendSummary({
+    intakeHistory,
+    targets,
+    windowDays: 7,
+    referenceDate: '2026-08-25'
+  });
+
+  assert('Test L: Header is NUTRITIONAL TREND SUMMARY', summary7.includes('NUTRITIONAL TREND SUMMARY'));
+  assert('Test L: States 7-day calendar window with 3 logged days', summary7.includes('7-day calendar window · 3 logged days'));
+  assert('Test L: Does not produce misleading fraction notation (no 3/7)', !summary7.includes('3/7'));
+  assert('Test L: Formats calories with mean, median, SD, range, target, diff, %diff',
+    summary7.includes('mean=2,100 kcal') && summary7.includes('median=2,100 kcal') &&
+    summary7.includes('SD=100 kcal') && summary7.includes('range=2,000–2,200 kcal') &&
+    summary7.includes('target=2,000 kcal') && summary7.includes('diff=+100 kcal') &&
+    summary7.includes('%diff=+5.00%'));
+  assert('Test L: Includes energy balance heuristic calculation',
+    summary7.includes('Theoretical weight change: +0.20 lb/week') &&
+    summary7.includes('theoretical 3,500 kcal/lb equivalence'));
+  assert('Test L: Includes macro statistics for carbs, fat, protein',
+    summary7.includes('mean=210.0 g') && summary7.includes('mean=55.0 g') && summary7.includes('mean=160.0 g'));
+  assert('Test L: Includes macro calorie split block',
+    summary7.includes('MACRO CALORIE SPLIT (based on mean intakes)') &&
+    summary7.includes('Carbs (4 kcal/g)') && summary7.includes('Fat (9 kcal/g)') &&
+    summary7.includes('Protein (4 kcal/g)'));
+  assert('Test L: Includes aligned comparison window trend',
+    summary7.includes('TREND COMPARISON (7-DAY ALIGNED WINDOWS)') &&
+    summary7.includes('7-DAY COMPARISON') &&
+    summary7.includes('Current:  2026-08-19 to 2026-08-25 (3 logged days)') &&
+    summary7.includes('Previous: 2026-08-12 to 2026-08-18 (2 logged days)'));
+  assert('Test L: Comparison section includes deltaMean and percentChange',
+    summary7.includes('+175.0 kcal (+9.1%)'));
+  assert('Test L: Includes tab-separated statistical breakdown table',
+    summary7.includes('STATISTICAL BREAKDOWN (7-day window · 3 logged days)') &&
+    summary7.includes('METRIC\tMEAN\tSD (±)\tMEDIAN\tMIN–MAX\tTARGET\t% DIFF\tN') &&
+    summary7.includes('CALORIES\t2,100 kcal\t±100\t2,100 kcal\t2,000–2,200 kcal\t2,000 kcal\t+5.0%\t3'));
+  assert('Test L: Output contains no NaN or undefined',
+    !summary7.includes('NaN') && !summary7.includes('undefined'));
+
+  // 2. 14-Day Window Summary
+  const summary14 = formatNutritionalTrendSummary({
+    intakeHistory,
+    targets,
+    windowDays: 14,
+    referenceDate: '2026-08-25'
+  });
+  assert('Test L: 14-day window reports 5 logged days',
+    summary14.includes('14-day calendar window · 5 logged days') || summary14.includes('14-day window · 5 logged days'));
+  assert('Test L: 14-day window comparison references 14-day windows',
+    summary14.includes('14-DAY COMPARISON'));
+
+  // 3. Single observation day (n=1) edge case
+  const singleObsHistory = {
+    '2026-08-25': {
+      totals: { calories: 2000, protein: 150, carbs: 200, fat: 50 },
+      targets: { calories: 2000, protein: 150, carbs: 200, fat: 50 }
+    }
+  };
+  const summarySingle = formatNutritionalTrendSummary({
+    intakeHistory: singleObsHistory,
+    targets,
+    windowDays: 7,
+    referenceDate: '2026-08-25'
+  });
+  assert('Test L: Single obs formats SD as dash', summarySingle.includes('SD=— kcal'));
+  assert('Test L: Single obs table row has SD as dash', summarySingle.includes('CALORIES\t2,000 kcal\t—\t2,000 kcal'));
+  assert('Test L: Single obs contains no NaN or undefined', !summarySingle.includes('NaN') && !summarySingle.includes('undefined'));
+
+  // 4. Empty intake history handling
+  const emptySummary = formatNutritionalTrendSummary({
+    intakeHistory: {},
+    targets,
+    windowDays: 7,
+    referenceDate: '2026-08-25'
+  });
+  assert('Test L: Empty history shows notice', emptySummary.includes('No intake snapshots recorded in this period.'));
+  assert('Test L: Empty history displays 0 logged days', emptySummary.includes('7-DAY WINDOW · 0 logged days'));
+  assert('Test L: Empty history contains no NaN or undefined', !emptySummary.includes('NaN') && !emptySummary.includes('undefined'));
+
+  // 5. Default options call without parameters
+  const defaultSummary = formatNutritionalTrendSummary();
+  assert('Test L: Calling formatNutritionalTrendSummary with no arguments does not throw',
+    typeof defaultSummary === 'string' && defaultSummary.includes('NUTRITIONAL TREND SUMMARY'));
+
+  // 6. formatNutritionalSummary alias
+  assert('Test L: formatNutritionalSummary alias exists and is identical',
+    formatNutritionalSummary === formatNutritionalTrendSummary);
 }
 
 

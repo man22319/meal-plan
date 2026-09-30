@@ -49,6 +49,7 @@ runRecommendationTestSuite();
 runIngredientSearchTestSuite();
 runMeasuredFoodsTestSuite();
 runStatsTestSuite();
+runFormattersTests();
 
 // Base nutritional target
 export const DAILY_TARGET = {

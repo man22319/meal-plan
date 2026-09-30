@@ -4,7 +4,7 @@
 
 import { state, generateId } from './core/state.js';
 import { Optimization } from './core/solver.js';
-import { formatDailySummary, formatWeightTrendAndHistorySummary } from './core/formatters.js';
+import { formatDailySummary, formatWeightTrendAndHistorySummary, formatNutritionalTrendSummary } from './core/formatters.js';
 import { Persistence, ImportExport } from './io/persistence.js';
 import { UI } from './ui/render.js';
 import { recordWeightEntry } from './core/history.js';
@@ -49,6 +49,61 @@ function setupEventListeners() {
       copyWeightBtn.textContent = 'Copied';
       setTimeout(() => {
         copyWeightBtn.textContent = originalText;
+      }, 1500);
+    };
+
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(summary);
+        markCopied();
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+    } catch {
+      // Fallback attempt with textarea
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = summary;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) {
+          markCopied();
+          return;
+        }
+      } catch {
+        // Fallback failed
+      }
+      UI.showErrors(['Clipboard write failed. Please check clipboard permissions.']);
+    }
+  });
+
+  // Copy nutritional trend summary
+  const copyNutrBtn = document.getElementById('copy-nutrition-trend-btn') ||
+                      document.getElementById('copy-nutritional-trend-btn') ||
+                      document.getElementById('copy-nutritional-trend-summary-btn') ||
+                      document.getElementById('copy-nutrition-summary-btn');
+  copyNutrBtn?.addEventListener('click', async () => {
+    const activeDays = (UI.getActiveNutritionWindowDays && typeof UI.getActiveNutritionWindowDays === 'function')
+      ? UI.getActiveNutritionWindowDays()
+      : 7;
+
+    const summary = formatNutritionalTrendSummary({
+      intakeHistory: state.intakeHistory,
+      targets: state.targets,
+      windowDays: activeDays,
+      referenceDate: getLocalDateString()
+    });
+
+    const markCopied = () => {
+      const originalText = copyNutrBtn.textContent;
+      copyNutrBtn.textContent = 'Copied';
+      setTimeout(() => {
+        copyNutrBtn.textContent = originalText;
       }, 1500);
     };
 
