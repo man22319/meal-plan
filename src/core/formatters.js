@@ -441,21 +441,34 @@ export function formatWeightAndNutritionSummary({
 
   if (trend !== null) {
     const fmtSign = (v) => {
+      if (typeof v !== 'number' || isNaN(v)) return '—';
       const s = Math.abs(v) < 0.0001 ? 0 : v;
-      return `${s > 0.001 ? '+' : ''}${s.toFixed(2)}`;
-    };
-    const fmtHacLine = (name, h) => {
-      const capStr = h.lagUsed < h.requestedLag ? ` (lag ${h.lagUsed} capped)` : ` (lag ${h.lagUsed})`;
-      return `  ${name}:  SE: ${h.standardErrorPerWeek.toFixed(2)} lb/wk | 95% CI: [${fmtSign(h.confidenceInterval95.lower)} to ${fmtSign(h.confidenceInterval95.upper)}] lb/wk${capStr}`;
+      return `${s > 0.001 ? '+' : s < -0.001 ? '−' : ''}${Math.abs(s).toFixed(2)}`;
     };
 
     lines.push(`Observations: n = ${trend.observationCount} (df = ${trend.degreesOfFreedom})`);
+    lines.push(`HAC Bandwidth: L = ${trend.bandwidth}${trend.isSmallSample ? ' (Small-sample HAC estimate)' : ''}`);
     lines.push('');
     lines.push('Newey-West Uncertainty (95% CI):');
-    lines.push(fmtHacLine('HAC(7) ', trend.hac[7]));
-    lines.push(fmtHacLine('HAC(14)', trend.hac[14]));
-    lines.push(fmtHacLine('HAC(30)', trend.hac[30]));
-    lines.push('* Observation-index lags. Scale-weight trend estimate; does not directly measure fat-mass change.');
+    lines.push(`  HAC SE: ${trend.standardErrorPerWeek.toFixed(2)} lb/wk | 95% CI: [${fmtSign(trend.confidenceInterval95.lower)} to ${fmtSign(trend.confidenceInterval95.upper)}] lb/wk (bandwidth L = ${trend.bandwidth})`);
+
+    if (trend.sensitivity) {
+      lines.push('');
+      lines.push('Slope Sensitivity (Leave-One-Out):');
+      lines.push(`  Full sample:    ${fmtSign(trend.sensitivity.fullSlope)} lb/wk`);
+      lines.push(`  LOO range:      ${fmtSign(trend.sensitivity.minSlope)} to ${fmtSign(trend.sensitivity.maxSlope)} lb/wk`);
+      lines.push(`  Median LOO:     ${fmtSign(trend.sensitivity.medianSlope)} lb/wk`);
+      lines.push(`  Without latest: ${trend.sensitivity.withoutLatestSlope !== null ? `${fmtSign(trend.sensitivity.withoutLatestSlope)} lb/wk` : '—'}`);
+      if (trend.sensitivity.mostInfluential) {
+        const mi = trend.sensitivity.mostInfluential;
+        lines.push(`  Most influential: ${mi.date || `obs #${mi.index + 1}`} (${mi.weight.toFixed(1)} lb, slope ${fmtSign(mi.slope)} lb/wk, Δ ${fmtSign(mi.deltaSlope)} lb/wk)`);
+      }
+    }
+
+    lines.push('');
+    lines.push(`Observed weight slope: ${fmtSign(trend.ratePerWeek)} lb/week.`);
+    lines.push('Short-term slope is sensitive to individual observations.');
+    lines.push('Interpretation of tissue change requires additional observations.');
   }
 
   if (!intakeStats || intakeStats.distinctDays === 0) {
@@ -547,19 +560,57 @@ export function formatWeightTrendAndHistorySummary({
   };
 
   if (trend !== null) {
-    lines.push(`Estimated rate: ${formatSigned(trend.ratePerWeek)} lb/week`);
-    lines.push('Newey-West SE:');
-    lines.push(`HAC(7): ${trend.hac[7].standardErrorPerWeek.toFixed(2)} lb/week`);
-    lines.push(`HAC(14): ${trend.hac[14].standardErrorPerWeek.toFixed(2)} lb/week`);
-    lines.push(`HAC(30): ${trend.hac[30].standardErrorPerWeek.toFixed(2)} lb/week`);
+    lines.push(`Weight slope: ${formatSigned(trend.ratePerWeek)} lb/week`);
     lines.push('');
-    lines.push('95% CI:');
-    lines.push(`HAC(7): ${formatSigned(trend.hac[7].confidenceInterval95.lower)} to ${formatSigned(trend.hac[7].confidenceInterval95.upper)} lb/week`);
-    lines.push(`HAC(14): ${formatSigned(trend.hac[14].confidenceInterval95.lower)} to ${formatSigned(trend.hac[14].confidenceInterval95.upper)} lb/week`);
-    lines.push(`HAC(30): ${formatSigned(trend.hac[30].confidenceInterval95.lower)} to ${formatSigned(trend.hac[30].confidenceInterval95.upper)} lb/week`);
+    lines.push(`n = ${trend.observationCount}`);
+    lines.push(`HAC bandwidth = ${trend.bandwidth}`);
+    if (trend.isSmallSample) {
+      lines.push('Small-sample HAC estimate');
+    }
+    lines.push(`HAC SE = ${trend.standardErrorPerWeek.toFixed(2)} lb/week`);
+    lines.push(`95% CI = ${formatSigned(trend.confidenceInterval95.lower)} to ${formatSigned(trend.confidenceInterval95.upper)} lb/week`);
+
+    if (trend.sensitivity) {
+      lines.push('');
+      lines.push('Slope sensitivity:');
+      lines.push(`Full sample:       ${formatSigned(trend.sensitivity.fullSlope)} lb/week`);
+      lines.push(`LOO range:         ${formatSigned(trend.sensitivity.minSlope)} to ${formatSigned(trend.sensitivity.maxSlope)} lb/week`);
+      lines.push(`Median LOO:        ${formatSigned(trend.sensitivity.medianSlope)} lb/week`);
+      lines.push(`Without latest:    ${trend.sensitivity.withoutLatestSlope !== null ? `${formatSigned(trend.sensitivity.withoutLatestSlope)} lb/week` : '—'}`);
+      if (trend.sensitivity.mostInfluential) {
+        const mi = trend.sensitivity.mostInfluential;
+        lines.push(`Most influential:  ${mi.date || `obs #${mi.index + 1}`} (${mi.weight.toFixed(1)} lb, without: ${formatSigned(mi.slope)} lb/wk)`);
+      }
+    }
+
+    lines.push('');
+    lines.push(`Observed weight slope: ${formatSigned(trend.ratePerWeek)} lb/week.`);
+    lines.push('Short-term slope is sensitive to individual observations.');
+    lines.push('Interpretation of tissue change requires additional observations.');
     lines.push('');
     lines.push(`Observations: n = ${trend.observationCount}`);
     lines.push(`Degrees of freedom: ${trend.degreesOfFreedom}`);
+
+    if (windowDays === 14) {
+      const trend30 = calculateWeightTrend(weightHistory, {
+        windowDays: 30,
+        minObservations: 3,
+        referenceDate: refDate
+      });
+
+      if (trend30 !== null) {
+        lines.push('');
+        lines.push('30-DAY OBSERVED WEIGHT SLOPE (EXTENDED)');
+        lines.push(`Slope: ${formatSigned(trend30.ratePerWeek)} lb/week`);
+        lines.push(`n = ${trend30.observationCount}, HAC bandwidth = ${trend30.bandwidth} (df = ${trend30.degreesOfFreedom})`);
+        lines.push(`HAC SE = ${trend30.standardErrorPerWeek.toFixed(2)} lb/week`);
+        lines.push(`95% CI = ${formatSigned(trend30.confidenceInterval95.lower)} to ${formatSigned(trend30.confidenceInterval95.upper)} lb/week`);
+        if (trend30.sensitivity) {
+          lines.push(`Without latest:    ${trend30.sensitivity.withoutLatestSlope !== null ? `${formatSigned(trend30.sensitivity.withoutLatestSlope)} lb/week` : '—'}`);
+          lines.push(`LOO range:         ${formatSigned(trend30.sensitivity.minSlope)} to ${formatSigned(trend30.sensitivity.maxSlope)} lb/week (median: ${formatSigned(trend30.sensitivity.medianSlope)} lb/wk)`);
+        }
+      }
+    }
   } else {
     const validObs = getWeightObservations(weightHistory, windowDays, refDate);
     lines.push('Estimated rate: unavailable');

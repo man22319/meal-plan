@@ -1991,8 +1991,9 @@ export const UI = {
     const curW = calculateCurrentWeight(state.weightHistory, today);
     const avg7 = calculateMovingAverage(state.weightHistory, 7, today);
     const avg14 = calculateMovingAverage(state.weightHistory, 14, today);
-    const trend = calculateWeightTrend(state.weightHistory, { windowDays: 14, minObservations: 3, referenceDate: today });
-    const trendRate = trend ? trend.ratePerWeek : null;
+    const trend14 = calculateWeightTrend(state.weightHistory, { windowDays: 14, minObservations: 3, referenceDate: today });
+    const trend30 = calculateWeightTrend(state.weightHistory, { windowDays: 30, minObservations: 3, referenceDate: today });
+    const trendRate = trend14 ? trend14.ratePerWeek : null;
 
     const statsGrid = document.getElementById('weight-stats-grid');
     if (statsGrid) {
@@ -2022,7 +2023,7 @@ export const UI = {
           <div class="stat-value">${avg14Display}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">RATE</div>
+          <div class="stat-label">14D OBSERVED SLOPE</div>
           <div class="stat-value ${rateClass}">${rateDisplay}</div>
         </div>
       `;
@@ -2031,12 +2032,12 @@ export const UI = {
     // Newey-West HAC Uncertainty Card
     const hacCard = document.getElementById('weight-hac-card');
     if (hacCard) {
-      if (trend !== null) {
+      if (trend14 !== null) {
         const formatSigned = (v) => {
           if (typeof v !== 'number' || isNaN(v)) return '—';
           const s = Math.abs(v) < 0.0001 ? 0 : v;
-          const sign = s > 0.001 ? '+' : '';
-          return `${sign}${s.toFixed(2)}`;
+          const sign = s > 0.001 ? '+' : s < -0.001 ? '−' : '';
+          return `${sign}${Math.abs(s).toFixed(2)}`;
         };
 
         const formatCi = (ci) => {
@@ -2044,51 +2045,123 @@ export const UI = {
           return `${formatSigned(ci.lower)} to ${formatSigned(ci.upper)}`;
         };
 
-        const getLagTagHtml = (hacItem) => {
-          const isCapped = hacItem.lagUsed < hacItem.requestedLag;
-          const tagText = isCapped ? `lag ${hacItem.lagUsed} (capped)` : `lag ${hacItem.lagUsed}`;
-          const tagClass = isCapped ? 'hac-lag-tag tag-capped' : 'hac-lag-tag';
-          return `<span class="${tagClass}">${tagText}</span>`;
-        };
+        const smallSampleBadge = trend14.isSmallSample
+          ? `<span class="hac-diagnostic-tag" id="hac-small-sample-badge">Small-Sample (t-dist)</span>`
+          : '';
+
+        let sensitivityHtml = '';
+        if (trend14.sensitivity) {
+          sensitivityHtml = `
+            <div class="hac-sensitivity-panel">
+              <div class="hac-sensitivity-header">
+                <span class="hac-sensitivity-title">Slope Sensitivity (Leave-One-Out)</span>
+              </div>
+              <div class="hac-sens-table-wrap">
+                <table class="hac-sens-table">
+                  <thead>
+                    <tr>
+                      <th class="sens-th-horizon">Window</th>
+                      <th class="sens-th-num">Full (lb/wk)</th>
+                      <th class="sens-th-num">w/o Latest</th>
+                      <th class="sens-th-num">LOO Range</th>
+                      <th class="sens-th-num">Median</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="sens-td-horizon">14-Day (n=${trend14.observationCount})</td>
+                      <td class="sens-td-num">${formatSigned(trend14.sensitivity.fullSlope)}</td>
+                      <td class="sens-td-num">${trend14.sensitivity.withoutLatestSlope !== null ? formatSigned(trend14.sensitivity.withoutLatestSlope) : '—'}</td>
+                      <td class="sens-td-num">${formatSigned(trend14.sensitivity.minSlope)} to ${formatSigned(trend14.sensitivity.maxSlope)}</td>
+                      <td class="sens-td-num">${formatSigned(trend14.sensitivity.medianSlope)}</td>
+                    </tr>
+                    ${trend30?.sensitivity ? `
+                    <tr>
+                      <td class="sens-td-horizon">30-Day (n=${trend30.observationCount})</td>
+                      <td class="sens-td-num">${formatSigned(trend30.sensitivity.fullSlope)}</td>
+                      <td class="sens-td-num">${trend30.sensitivity.withoutLatestSlope !== null ? formatSigned(trend30.sensitivity.withoutLatestSlope) : '—'}</td>
+                      <td class="sens-td-num">${formatSigned(trend30.sensitivity.minSlope)} to ${formatSigned(trend30.sensitivity.maxSlope)}</td>
+                      <td class="sens-td-num">${formatSigned(trend30.sensitivity.medianSlope)}</td>
+                    </tr>
+                    ` : ''}
+                  </tbody>
+                </table>
+              </div>
+              ${trend14.sensitivity.mostInfluential ? `
+                <div class="hac-influential-note">
+                  <span class="influential-prefix">Observation shifting 14D slope most:</span>
+                  <span>${trend14.sensitivity.mostInfluential.date || `obs #${trend14.sensitivity.mostInfluential.index + 1}`} (${trend14.sensitivity.mostInfluential.weight.toFixed(1)} lb) — shifts slope to ${formatSigned(trend14.sensitivity.mostInfluential.slope)} lb/wk (Δ ${formatSigned(trend14.sensitivity.mostInfluential.deltaSlope)} lb/wk).</span>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }
 
         hacCard.innerHTML = `
           <div class="hac-card-header">
-            <div class="hac-title">NEWEY-WEST HAC UNCERTAINTY</div>
-            <div class="hac-meta-badge">n = ${trend.observationCount} <span class="hac-meta-sep">•</span> df = ${trend.degreesOfFreedom}</div>
+            <div class="hac-title-wrap">
+              <span class="hac-title">HAC UNCERTAINTY &amp; SENSITIVITY</span>
+              ${smallSampleBadge}
+            </div>
+            <div class="hac-meta-badge">Student's t (df = n − 2)</div>
           </div>
-          <div class="hac-table">
-            <div class="hac-table-header">
-              <div class="hac-col-horizon">Horizon</div>
-              <div class="hac-col-se">Newey-West SE</div>
-              <div class="hac-col-ci">95% CI</div>
-            </div>
-            <div class="hac-table-row">
-              <div class="hac-col-horizon">
-                <span class="hac-horizon-name">HAC(7)</span>
-                ${getLagTagHtml(trend.hac[7])}
+
+          <!-- PRIMARY HORIZON: 14-DAY OBSERVED WEIGHT SLOPE -->
+          <div class="hac-horizon-card primary-horizon">
+            <div class="hac-horizon-header">
+              <div class="hac-horizon-title-group">
+                <span class="hac-horizon-badge">PRIMARY</span>
+                <span class="hac-horizon-title">14-Day Observed Weight Slope</span>
               </div>
-              <div class="hac-col-se">${trend.hac[7].standardErrorPerWeek.toFixed(2)} <span class="stat-unit">lb/wk</span></div>
-              <div class="hac-col-ci">${formatCi(trend.hac[7].confidenceInterval95)} <span class="stat-unit">lb/wk</span></div>
+              <div class="hac-horizon-slope">${formatSigned(trend14.ratePerWeek)} <span class="stat-unit">lb/wk</span></div>
             </div>
-            <div class="hac-table-row">
-              <div class="hac-col-horizon">
-                <span class="hac-horizon-name">HAC(14)</span>
-                ${getLagTagHtml(trend.hac[14])}
+            <div class="hac-horizon-substats">
+              <div class="hac-horizon-subitem">
+                <span class="subitem-label">HAC SE:</span>
+                <span class="subitem-val">${trend14.standardErrorPerWeek.toFixed(2)} lb/wk</span>
               </div>
-              <div class="hac-col-se">${trend.hac[14].standardErrorPerWeek.toFixed(2)} <span class="stat-unit">lb/wk</span></div>
-              <div class="hac-col-ci">${formatCi(trend.hac[14].confidenceInterval95)} <span class="stat-unit">lb/wk</span></div>
-            </div>
-            <div class="hac-table-row">
-              <div class="hac-col-horizon">
-                <span class="hac-horizon-name">HAC(30)</span>
-                ${getLagTagHtml(trend.hac[30])}
+              <div class="hac-horizon-subitem">
+                <span class="subitem-label">95% CI:</span>
+                <span class="subitem-val">${formatCi(trend14.confidenceInterval95)} lb/wk</span>
               </div>
-              <div class="hac-col-se">${trend.hac[30].standardErrorPerWeek.toFixed(2)} <span class="stat-unit">lb/wk</span></div>
-              <div class="hac-col-ci">${formatCi(trend.hac[30].confidenceInterval95)} <span class="stat-unit">lb/wk</span></div>
+              <div class="hac-horizon-subitem hac-subitem-spec">
+                <span class="subitem-label">Specs:</span>
+                <span class="subitem-val">n = ${trend14.observationCount} · L = ${trend14.bandwidth} · df = ${trend14.degreesOfFreedom} (t<sub>crit</sub> = ${trend14.hac.tCritical.toFixed(3)})</span>
+              </div>
             </div>
           </div>
+
+          <!-- SECONDARY HORIZON: 30-DAY OBSERVED WEIGHT SLOPE -->
+          ${trend30 !== null ? `
+          <div class="hac-horizon-card secondary-horizon">
+            <div class="hac-horizon-header">
+              <div class="hac-horizon-title-group">
+                <span class="hac-horizon-badge secondary">EXTENDED</span>
+                <span class="hac-horizon-title">30-Day Observed Weight Slope</span>
+              </div>
+              <div class="hac-horizon-slope">${formatSigned(trend30.ratePerWeek)} <span class="stat-unit">lb/wk</span></div>
+            </div>
+            <div class="hac-horizon-substats">
+              <div class="hac-horizon-subitem">
+                <span class="subitem-label">HAC SE:</span>
+                <span class="subitem-val">${trend30.standardErrorPerWeek.toFixed(2)} lb/wk</span>
+              </div>
+              <div class="hac-horizon-subitem">
+                <span class="subitem-label">95% CI:</span>
+                <span class="subitem-val">${formatCi(trend30.confidenceInterval95)} lb/wk</span>
+              </div>
+              <div class="hac-horizon-subitem hac-subitem-spec">
+                <span class="subitem-label">Specs:</span>
+                <span class="subitem-val">n = ${trend30.observationCount} · L = ${trend30.bandwidth} · df = ${trend30.degreesOfFreedom} (t<sub>crit</sub> = ${trend30.hac.tCritical.toFixed(3)})</span>
+              </div>
+            </div>
+          </div>
+          ` : ''}
+
+          ${sensitivityHtml}
+
           <div class="hac-footnote">
-            Observation-index lags. Evaluates scale-weight trajectory across consecutive weigh-ins; does not directly measure fat-mass change.
+            Estimating statistical slope of observed scale weight, not biological tissue accretion. Scale weight contains short-term fluid and glycogen shifts.
           </div>
         `;
       } else {
@@ -2282,6 +2355,20 @@ export const UI = {
           ? `<span class="stat-sd-tag">SD ${cal.sdDisplay}</span>`
           : '';
 
+        let energyHeuristicHtml = '';
+        if (intakeStats.calories.mean !== null && intakeStats.calories.target !== null) {
+          const deltaE = intakeStats.calories.difference;
+          const deltaWEnergy = (7 * deltaE) / 3500;
+          const signW = deltaWEnergy > 0.001 ? '+' : deltaWEnergy < -0.001 ? '−' : '';
+          energyHeuristicHtml = `
+            <div class="nutrition-energy-heuristic">
+              <span class="heuristic-tag">Rough energy-balance heuristic:</span>
+              <span class="heuristic-val">${signW}${Math.abs(deltaWEnergy).toFixed(2)} lb/week</span>
+              <span class="heuristic-note">(theoretical 3,500 kcal/lb equivalence; not an estimate of actual tissue gain)</span>
+            </div>
+          `;
+        }
+
         nutritionHeroContainer.innerHTML = `
           <!-- HERO CALORIES CARD -->
           <div class="nutrition-hero-card">
@@ -2317,6 +2404,7 @@ export const UI = {
             </div>
 
             ${macroBarHtml}
+            ${energyHeuristicHtml}
           </div>
 
           <!-- 3 MACRO CARDS UNDER HERO (CARBS, FAT, PROTEIN) -->

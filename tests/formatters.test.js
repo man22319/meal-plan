@@ -426,14 +426,16 @@ console.log('══════════════════════�
   });
 
   assert('Test I: Starts with WEIGHT TREND section', trendText.includes('WEIGHT TREND'));
-  assert('Test I: Formats estimated rate', trendText.includes('Estimated rate: −3.42 lb/week'));
-  assert('Test I: Includes Newey-West SE header', trendText.includes('Newey-West SE:'));
-  assert('Test I: Formats HAC(7) SE', trendText.includes('HAC(7): 0.24 lb/week'));
-  assert('Test I: Formats HAC(14) SE', trendText.includes('HAC(14): 0.24 lb/week'));
-  assert('Test I: Formats HAC(30) SE', trendText.includes('HAC(30): 0.24 lb/week'));
-  assert('Test I: Includes 95% CI header', trendText.includes('95% CI:'));
-  assert('Test I: Formats HAC(7) CI', trendText.includes('HAC(7): −4.20 to −2.64 lb/week'));
-  assert('Test I: Includes observation count', trendText.includes('Observations: n = 5'));
+  assert('Test I: Formats weight slope', trendText.includes('Weight slope: −3.42 lb/week'));
+  assert('Test I: Formats observation count n = 5', trendText.includes('n = 5'));
+  assert('Test I: Formats HAC bandwidth', trendText.includes('HAC bandwidth = 2'));
+  assert('Test I: Formats small-sample diagnostic label', trendText.includes('Small-sample HAC estimate'));
+  assert('Test I: Formats HAC SE', trendText.includes('HAC SE = 0.29 lb/week'));
+  assert('Test I: Formats 95% CI', trendText.includes('95% CI = −4.34 to −2.50 lb/week'));
+  assert('Test I: Includes slope sensitivity section', trendText.includes('Slope sensitivity:'));
+  assert('Test I: Formats LOO range', trendText.includes('LOO range:'));
+  assert('Test I: Formats without latest slope', trendText.includes('Without latest:    −2.73 lb/week'));
+  assert('Test I: Includes neutral disclaimer', trendText.includes('Observed weight slope: −3.42 lb/week.'));
   assert('Test I: Includes degrees of freedom', trendText.includes('Degrees of freedom: 3'));
   assert('Test I: Includes LONGITUDINAL HISTORY section', trendText.includes('LONGITUDINAL HISTORY\n5 DAYS'));
   assert('Test I: Includes tab-separated table header', trendText.includes('DATE\tWEIGHT (LB)\tKCAL\tPROTEIN\tCARBS\tFAT'));

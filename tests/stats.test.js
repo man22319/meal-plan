@@ -2,6 +2,9 @@
 // STATS UNIT TESTS — Pure Math & Data Invariants
 // ══════════════════════════════════════════
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import {
   parseDateToMs,
   formatDateStr,
@@ -17,8 +20,15 @@ import {
   getStudentTCriticalValue,
   STUDENT_T_975_TABLE,
   getAlignedComparisonWindows,
-  calculateNutritionalTrendComparison
+  calculateNutritionalTrendComparison,
+  computeAutomaticBandwidth,
+  calculateOlsSlope,
+  calculateSlopeSensitivity
 } from '../src/core/stats.js';
+import { formatWeightTrendAndHistorySummary } from '../src/core/formatters.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let failed = 0;
 function assert(name, condition, details = '') {
@@ -726,6 +736,244 @@ console.log('══════════════════════�
   assert('Sparse current window start remains 2026-09-14', sparseTrend.current.startDate === '2026-09-14');
   assert('Sparse current window end remains 2026-09-20', sparseTrend.current.endDate === '2026-09-20');
   assert('Sparse current loggedDays reflects 2', sparseTrend.current.loggedDays === 2);
+}
+
+// ── TEST 29: Automatic Newey-West Bandwidth & Edge Cases ──
+{
+  // Formula: L = floor(4 * (n / 100)^(2/9)) constrained by 0 <= L <= n - 1
+  // n = 14: floor(4 * (14/100)^(2/9)) = floor(2.589) = 2
+  assert('Automatic bandwidth at n = 14 is exactly 2', computeAutomaticBandwidth(14) === 2);
+  
+  // Edge cases
+  assert('Automatic bandwidth at n <= 0 is 0', computeAutomaticBandwidth(0) === 0 && computeAutomaticBandwidth(-5) === 0);
+  assert('Automatic bandwidth at n = 1 is 0 (constrained to n - 1 = 0)', computeAutomaticBandwidth(1) === 0);
+  assert('Automatic bandwidth at n = 2 is 1 (floor(1.68) = 1, <= n - 1 = 1)', computeAutomaticBandwidth(2) === 1);
+  assert('Automatic bandwidth at n = 3 is 1 (floor(1.84) = 1, <= n - 1 = 2)', computeAutomaticBandwidth(3) === 1);
+  assert('Automatic bandwidth at n = 5 is 2 (floor(2.05) = 2, <= n - 1 = 4)', computeAutomaticBandwidth(5) === 2);
+  assert('Automatic bandwidth at n = 30 is 3 (floor(3.06) = 3)', computeAutomaticBandwidth(30) === 3);
+  assert('Automatic bandwidth at n = 100 is 4 (floor(4 * 1) = 4)', computeAutomaticBandwidth(100) === 4);
+  assert('Automatic bandwidth at n = 500 is 5 (floor(5.72) = 5)', computeAutomaticBandwidth(500) === 5);
+
+  // Constraint 0 <= L <= n - 1 holds for all test values
+  for (let n = 1; n <= 150; n++) {
+    const L = computeAutomaticBandwidth(n);
+    if (L < 0 || L > n - 1) {
+      assert(`Constraint 0 <= L <= n-1 violated at n=${n}`, false);
+      break;
+    }
+  }
+  assert('Constraint 0 <= L <= n - 1 holds across n = 1..150', true);
+}
+
+// ── TEST 30: Bartlett Weights Verification ──
+{
+  // For L = 2: w_1 = 1 - 1/3 = 2/3, w_2 = 1 - 2/3 = 1/3
+  const L = 2;
+  const w1 = 1 - 1 / (L + 1);
+  const w2 = 1 - 2 / (L + 1);
+  assert('Bartlett weight w_1 for L = 2 is 2/3', Math.abs(w1 - 2 / 3) < 1e-12);
+  assert('Bartlett weight w_2 for L = 2 is 1/3', Math.abs(w2 - 1 / 3) < 1e-12);
+
+  // Bartlett weight w_k = 1 - k / (L + 1) strictly positive and decreasing to 1/(L+1)
+  for (let k = 1; k <= L; k++) {
+    const wk = 1 - k / (L + 1);
+    assert(`Bartlett weight w_${k} > 0`, wk > 0);
+  }
+}
+
+// ── TEST 31: OLS Point Estimate Invariance Under HAC ──
+{
+  // Regression point estimate must remain the OLS estimate, HAC only affects SE & CI
+  const obs = [
+    { ms: Date.UTC(2026, 7, 1), weight: 186.0 },
+    { ms: Date.UTC(2026, 7, 2), weight: 185.5 },
+    { ms: Date.UTC(2026, 7, 3), weight: 185.8 },
+    { ms: Date.UTC(2026, 7, 4), weight: 185.0 },
+    { ms: Date.UTC(2026, 7, 5), weight: 184.7 },
+    { ms: Date.UTC(2026, 7, 6), weight: 184.2 },
+    { ms: Date.UTC(2026, 7, 7), weight: 184.0 }
+  ];
+  const model = fitLinearRegression(obs);
+  const hacAuto = calculateNeweyWestCovariance(model); // auto L
+  const hac0 = calculateNeweyWestCovariance(model, 0); // L = 0
+  const hac1 = calculateNeweyWestCovariance(model, 1); // L = 1
+  const hac2 = calculateNeweyWestCovariance(model, 2); // L = 2
+
+  // Model ratePerWeek is identical
+  const olsRate = model.ratePerWeek;
+  assert('Model rate is unaltered by HAC', Math.abs(model.ratePerWeek - olsRate) < 1e-15);
+  // CI center is exactly model.ratePerWeek for any HAC bandwidth
+  const centerAuto = (hacAuto.confidenceInterval95.lower + hacAuto.confidenceInterval95.upper) / 2;
+  const center0 = (hac0.confidenceInterval95.lower + hac0.confidenceInterval95.upper) / 2;
+  const center1 = (hac1.confidenceInterval95.lower + hac1.confidenceInterval95.upper) / 2;
+  const center2 = (hac2.confidenceInterval95.lower + hac2.confidenceInterval95.upper) / 2;
+
+  assert('HAC auto CI centered on OLS slope', Math.abs(centerAuto - olsRate) < 1e-12);
+  assert('HAC(0) CI centered on OLS slope', Math.abs(center0 - olsRate) < 1e-12);
+  assert('HAC(1) CI centered on OLS slope', Math.abs(center1 - olsRate) < 1e-12);
+  assert('HAC(2) CI centered on OLS slope', Math.abs(center2 - olsRate) < 1e-12);
+}
+
+// ── TEST 32: Leave-One-Out (LOO) Sensitivity vs Independent Calculation ──
+{
+  const obs = [
+    { ms: Date.UTC(2026, 7, 1), weight: 185.0, date: '2026-08-01' },
+    { ms: Date.UTC(2026, 7, 2), weight: 184.8, date: '2026-08-02' },
+    { ms: Date.UTC(2026, 7, 3), weight: 185.3, date: '2026-08-03' },
+    { ms: Date.UTC(2026, 7, 4), weight: 184.6, date: '2026-08-04' },
+    { ms: Date.UTC(2026, 7, 5), weight: 184.0, date: '2026-08-05' }
+  ];
+
+  const fullSlope = calculateOlsSlope(obs);
+  const sens = calculateSlopeSensitivity(obs, fullSlope);
+
+  // Independent manual calculation for each leave-one-out subset
+  const independentSlopes = [];
+  for (let i = 0; i < obs.length; i++) {
+    const sub = obs.filter((_, idx) => idx !== i);
+    // manual OLS
+    const m = sub.length;
+    const t0 = sub[0].ms;
+    const t = sub.map(o => (o.ms - t0) / 86400000);
+    const meanT = t.reduce((a, b) => a + b, 0) / m;
+    const meanW = sub.reduce((a, b) => a + b.weight, 0) / m;
+    let sxx = 0, sxw = 0;
+    for (let j = 0; j < m; j++) {
+      sxx += (t[j] - meanT) ** 2;
+      sxw += (t[j] - meanT) * (sub[j].weight - meanW);
+    }
+    const beta = sxw / sxx;
+    independentSlopes.push(beta * 7);
+  }
+
+  assert('LOO returns 5 observations', sens.loo.length === 5);
+  for (let i = 0; i < obs.length; i++) {
+    assert(`LOO slope ${i} matches independent calculation`, Math.abs(sens.loo[i].slope - independentSlopes[i]) < 1e-12);
+  }
+
+  const sortedInd = [...independentSlopes].sort((a, b) => a - b);
+  assert('LOO minSlope matches independent min', Math.abs(sens.minSlope - sortedInd[0]) < 1e-12);
+  assert('LOO maxSlope matches independent max', Math.abs(sens.maxSlope - sortedInd[sortedInd.length - 1]) < 1e-12);
+  assert('LOO median matches independent median', Math.abs(sens.medianSlope - sortedInd[2]) < 1e-12);
+  assert('LOO withoutLatest matches independent last observation removal', Math.abs(sens.withoutLatestSlope - independentSlopes[4]) < 1e-12);
+
+  // Small n LOO: n = 3
+  const obs3 = obs.slice(0, 3);
+  const sens3 = calculateSlopeSensitivity(obs3);
+  assert('LOO works for n = 3', sens3 !== null && sens3.loo.length === 3);
+
+  // Degenerate n < 3
+  assert('LOO returns null for n < 3', calculateSlopeSensitivity(obs.slice(0, 2)) === null);
+}
+
+// ── TEST 33: Outlier & Latest Observation Non-Downweighting (191.6 lb retention) ──
+{
+  // Test case where latest observation is 191.6 lb (e.g. sharp spike on final day)
+  const history = {
+    '2026-08-12': { weight: 184.2 },
+    '2026-08-13': { weight: 184.4 },
+    '2026-08-14': { weight: 184.1 },
+    '2026-08-15': { weight: 184.3 },
+    '2026-08-16': { weight: 184.0 },
+    '2026-08-17': { weight: 184.5 },
+    '2026-08-18': { weight: 184.2 },
+    '2026-08-19': { weight: 184.6 },
+    '2026-08-20': { weight: 184.4 },
+    '2026-08-21': { weight: 184.7 },
+    '2026-08-22': { weight: 184.5 },
+    '2026-08-23': { weight: 184.8 },
+    '2026-08-24': { weight: 184.9 },
+    '2026-08-25': { weight: 191.6 } // spike on day 14
+  };
+
+  const trend = calculateWeightTrend(history, { windowDays: 14, referenceDate: '2026-08-25' });
+
+  assert('Primary analysis retains all 14 observations', trend.observationCount === 14);
+  assert('HAC bandwidth for n = 14 is automatically 2', trend.bandwidth === 2);
+  assert('Small-sample diagnostic flag is true for n = 14', trend.isSmallSample === true);
+
+  // The 191.6 lb observation is preserved in the primary slope
+  assert('Latest observation is NOT dropped or winsorized from primary rate', trend.ratePerWeek > 0);
+
+  // Sensitivity analysis reports without latest
+  assert('Sensitivity analysis is populated', trend.sensitivity !== null);
+  assert('Without latest slope is lower than full-sample slope', trend.sensitivity.withoutLatestSlope < trend.ratePerWeek);
+  assert('Most influential observation identified as 2026-08-25', trend.sensitivity.mostInfluential.date === '2026-08-25');
+  assert('Most influential weight is 191.6', trend.sensitivity.mostInfluential.weight === 191.6);
+}
+
+// ── TEST 34: Small-Sample Diagnostic Flag (n < 30) ──
+{
+  const makeHistory = (count) => {
+    const h = {};
+    for (let i = 0; i < count; i++) {
+      const date = new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10);
+      h[date] = { weight: 180 - 0.05 * i };
+    }
+    return h;
+  };
+
+  const trend14 = calculateWeightTrend(makeHistory(14), { windowDays: 20 });
+  assert('n = 14 has isSmallSample = true', trend14.isSmallSample === true);
+
+  const trend29 = calculateWeightTrend(makeHistory(29), { windowDays: 35 });
+  assert('n = 29 has isSmallSample = true', trend29.isSmallSample === true);
+
+  const trend30 = calculateWeightTrend(makeHistory(30), { windowDays: 35 });
+  assert('n = 30 has isSmallSample = false', trend30.isSmallSample === false);
+
+  const trend50 = calculateWeightTrend(makeHistory(50), { windowDays: 60 });
+  assert('n = 50 has isSmallSample = false', trend50.isSmallSample === false);
+}
+
+// ── TEST 35: Live Workspace ingredients.json Validation ──
+{
+  const ingredientsJsonPath = path.resolve(__dirname, '../ingredients.json');
+  if (fs.existsSync(ingredientsJsonPath)) {
+    const data = JSON.parse(fs.readFileSync(ingredientsJsonPath, 'utf8'));
+    const refDate = '2026-09-30';
+
+    // 1. Current weight & averages
+    const curW = calculateCurrentWeight(data.weightHistory, refDate);
+    const avg7 = calculateMovingAverage(data.weightHistory, 7, refDate);
+    const avg14 = calculateMovingAverage(data.weightHistory, 14, refDate);
+    assert('ingredients.json: current weight is 191.6 lb', curW === 191.6);
+    assert('ingredients.json: 7-day average is ~188.1 lb', Math.abs(avg7 - 188.14) < 0.05);
+    assert('ingredients.json: 14-day average is ~187.2 lb', Math.abs(avg14 - 187.19) < 0.05);
+
+    // 2. Trend & HAC diagnostics for n = 14
+    const trend = calculateWeightTrend(data.weightHistory, { windowDays: 14, referenceDate: refDate });
+    assert('ingredients.json: observation count is exactly 14', trend.observationCount === 14);
+    assert('ingredients.json: degrees of freedom is 12', trend.degreesOfFreedom === 12);
+    assert('ingredients.json: OLS slope is ~+2.01 lb/wk', Math.abs(trend.ratePerWeek - 2.01) < 0.02);
+    assert('ingredients.json: automatic HAC bandwidth is L = 2', trend.bandwidth === 2);
+    assert('ingredients.json: small-sample diagnostic flag is true (14 < 30)', trend.isSmallSample === true);
+    assert('ingredients.json: HAC standard error is ~0.61 lb/wk', Math.abs(trend.standardErrorPerWeek - 0.61) < 0.02);
+    assert('ingredients.json: 95% CI covers [+0.69, +3.34]',
+      Math.abs(trend.confidenceInterval95.lower - 0.69) < 0.05 && Math.abs(trend.confidenceInterval95.upper - 3.34) < 0.05);
+
+    // 3. Sensitivity analysis on real 191.6 lb observation
+    assert('ingredients.json: sensitivity analysis present', trend.sensitivity !== null);
+    assert('ingredients.json: LOO min slope is ~1.33 lb/wk', Math.abs(trend.sensitivity.minSlope - 1.33) < 0.02);
+    assert('ingredients.json: LOO max slope is ~2.25 lb/wk', Math.abs(trend.sensitivity.maxSlope - 2.25) < 0.02);
+    assert('ingredients.json: LOO median slope is ~2.03 lb/wk', Math.abs(trend.sensitivity.medianSlope - 2.03) < 0.02);
+    assert('ingredients.json: without latest (191.6 lb) slope is ~1.33 lb/wk', Math.abs(trend.sensitivity.withoutLatestSlope - 1.33) < 0.02);
+    assert('ingredients.json: most influential observation is 2026-09-30 (191.6 lb)',
+      trend.sensitivity.mostInfluential.date === '2026-09-30' && trend.sensitivity.mostInfluential.weight === 191.6);
+
+    // 4. Formatter export
+    const summaryText = formatWeightTrendAndHistorySummary({
+      weightHistory: data.weightHistory,
+      intakeHistory: data.intakeHistory,
+      referenceDate: refDate,
+      windowDays: 14
+    });
+    assert('ingredients.json: export includes Weight slope +2.01 lb/week', summaryText.includes('Weight slope: +2.01 lb/week'));
+    assert('ingredients.json: export includes n = 14', summaryText.includes('n = 14'));
+    assert('ingredients.json: export includes HAC bandwidth = 2', summaryText.includes('HAC bandwidth = 2'));
+    assert('ingredients.json: export includes Small-sample HAC estimate', summaryText.includes('Small-sample HAC estimate'));
+    assert('ingredients.json: export includes Without latest:    +1.33 lb/week', summaryText.includes('Without latest:    +1.33 lb/week'));
+  }
 }
 
 console.log(`\nStats Tests Completed: ${failed === 0 ? 'ALL PASSED' : `${failed} FAILED`}\n`);

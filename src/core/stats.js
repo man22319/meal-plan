@@ -263,8 +263,153 @@ export function fitLinearRegression(observations) {
 }
 
 /**
+ * Computes standard automatic Newey-West / Bartlett bandwidth L based on sample size n:
+ *   L = floor(4 * (n / 100)^(2/9))
+ * subject to the practical constraint:
+ *   0 <= L <= n - 1
+ */
+export function computeAutomaticBandwidth(n) {
+  if (typeof n !== 'number' || isNaN(n) || n <= 1) return 0;
+  const raw = Math.floor(4 * Math.pow(n / 100, 2 / 9));
+  return Math.max(0, Math.min(raw, n - 1));
+}
+
+/**
+ * Calculates ordinary least squares (OLS) slope (in lb/week) for a set of weight observations.
+ * Supports subsets of size m >= 2 with non-zero timestamp variance.
+ *
+ * @param {Array<{ms: number, weight: number}>} observations
+ * @returns {number|null} Slope in lb/week, or null if invalid or degenerate.
+ */
+export function calculateOlsSlope(observations) {
+  if (!Array.isArray(observations) || observations.length < 2) return null;
+  const m = observations.length;
+  const t0 = observations[0].ms;
+
+  let sumT = 0;
+  let sumW = 0;
+  for (let i = 0; i < m; i++) {
+    const elapsedDays = (observations[i].ms - t0) / 86400000;
+    const weight = typeof observations[i].weight === 'number' ? observations[i].weight : observations[i];
+    if (typeof weight !== 'number' || isNaN(weight) || weight <= 0) return null;
+    sumT += elapsedDays;
+    sumW += weight;
+  }
+
+  const meanT = sumT / m;
+  const meanW = sumW / m;
+
+  let Sxx = 0;
+  let Sxw = 0;
+  for (let i = 0; i < m; i++) {
+    const elapsedDays = (observations[i].ms - t0) / 86400000;
+    const weight = typeof observations[i].weight === 'number' ? observations[i].weight : observations[i];
+    const xi = elapsedDays - meanT;
+    const wi = weight - meanW;
+    Sxx += xi * xi;
+    Sxw += xi * wi;
+  }
+
+  if (Sxx < 1e-10) return null;
+  const beta = Sxw / Sxx; // lb/day
+  return beta * 7; // lb/week
+}
+
+/**
+ * Performs leave-one-out (LOO) sensitivity analysis for the weight slope.
+ * For each observation i (i = 0..n-1):
+ *   1. Removes observation i
+ *   2. Refits the same OLS regression
+ *   3. Records the resulting slope
+ *
+ * Reports:
+ *   - fullSlope: full-sample slope (lb/week)
+ *   - minSlope: minimum leave-one-out slope
+ *   - maxSlope: maximum leave-one-out slope
+ *   - medianSlope: median leave-one-out slope
+ *   - withoutLatestSlope: slope with the latest chronological observation removed
+ *   - mostInfluential: the observation whose removal changes the slope the most
+ *   - loo: individual leave-one-out results
+ *
+ * @param {Array<{ms: number, weight: number, date?: string}>} observations
+ * @param {number|null} [fullRatePerWeek=null]
+ * @returns {Object|null}
+ */
+export function calculateSlopeSensitivity(observations, fullRatePerWeek = null) {
+  if (!Array.isArray(observations) || observations.length < 3) return null;
+  const n = observations.length;
+
+  const fullSlope = typeof fullRatePerWeek === 'number' && !isNaN(fullRatePerWeek)
+    ? fullRatePerWeek
+    : calculateOlsSlope(observations);
+
+  if (fullSlope === null) return null;
+
+  const loo = [];
+  for (let i = 0; i < n; i++) {
+    const subset = observations.slice(0, i).concat(observations.slice(i + 1));
+    const slope = calculateOlsSlope(subset);
+    if (slope !== null) {
+      const deltaSlope = slope - fullSlope;
+      loo.push({
+        index: i,
+        date: observations[i].date || null,
+        weight: observations[i].weight,
+        slope,
+        deltaSlope,
+        absDeltaSlope: Math.abs(deltaSlope)
+      });
+    }
+  }
+
+  if (loo.length === 0) return null;
+
+  const slopes = loo.map(e => e.slope).sort((a, b) => a - b);
+  const minSlope = slopes[0];
+  const maxSlope = slopes[slopes.length - 1];
+
+  const mid = Math.floor(slopes.length / 2);
+  const medianSlope = slopes.length % 2 !== 0
+    ? slopes[mid]
+    : (slopes[mid - 1] + slopes[mid]) / 2;
+
+  // Observation whose removal changes slope the most (highest absDeltaSlope)
+  let mostInfluential = loo[0];
+  for (let i = 1; i < loo.length; i++) {
+    if (loo[i].absDeltaSlope > mostInfluential.absDeltaSlope) {
+      mostInfluential = loo[i];
+    }
+  }
+
+  // Slope with latest chronological observation removed (last observation: index n - 1)
+  const withoutLatestEntry = loo.find(e => e.index === n - 1) || null;
+  const withoutLatestSlope = withoutLatestEntry ? withoutLatestEntry.slope : null;
+  const withoutLatestDelta = withoutLatestEntry ? withoutLatestEntry.deltaSlope : null;
+
+  return {
+    fullSlope,
+    minSlope,
+    maxSlope,
+    medianSlope,
+    range: {
+      min: minSlope,
+      max: maxSlope
+    },
+    withoutLatestSlope,
+    withoutLatestDelta,
+    withoutLatest: withoutLatestEntry,
+    mostInfluential,
+    loo
+  };
+}
+
+/**
  * Calculates Newey-West HAC covariance estimate for a fitted linear regression
- * with Bartlett kernel weights w_ell = 1 - ell / (L_effective + 1).
+ * with Bartlett kernel weights w_k = 1 - k / (L + 1).
+ *
+ * When requestedLag is omitted, null, or 'auto', automatically determines the
+ * Bartlett bandwidth L from sample size n: L = floor(4 * (n / 100)^(2/9))
+ * constrained to 0 <= L <= n - 1.
  *
  * MATHEMATICAL NOTE ON SCALAR EQUIVALENCE:
  * Because the regression includes an intercept and the predictor is centered (x_i = t_i - bar{t}),
@@ -273,15 +418,20 @@ export function fitLinearRegression(observations) {
  * (X_c' X_c)^{-1} S_hat (X_c' X_c)^{-1} simplifies identically to S_hat_{22} / Sxx^2,
  * where s_i = x_i * hat{epsilon}_i. This is verified against an independent full 2x2
  * matrix sandwich implementation in unit tests.
- *
- * Lags are defined in observation-index space: correlations up to requestedLag adjacent
- * observations, capped at L_effective = min(requestedLag, n - 1).
  */
-export function calculateNeweyWestCovariance(fittedModel, requestedLag) {
+export function calculateNeweyWestCovariance(fittedModel, requestedLag = null) {
   if (!fittedModel || fittedModel.n < 3) return null;
 
   const { n, df, x, residuals, Sxx, ratePerWeek } = fittedModel;
-  const lagUsed = Math.min(requestedLag, n - 1);
+
+  let lagUsed;
+  if (requestedLag === null || requestedLag === undefined || requestedLag === 'auto') {
+    lagUsed = computeAutomaticBandwidth(n);
+  } else if (typeof requestedLag === 'number' && !isNaN(requestedLag)) {
+    lagUsed = Math.max(0, Math.min(Math.floor(requestedLag), n - 1));
+  } else {
+    lagUsed = computeAutomaticBandwidth(n);
+  }
 
   // Score vector element for slope: s_i = x_i * hat{epsilon}_i
   const s = new Array(n);
@@ -314,8 +464,9 @@ export function calculateNeweyWestCovariance(fittedModel, requestedLag) {
   const margin = tCrit * standardErrorPerWeek;
 
   return {
-    requestedLag,
+    bandwidth: lagUsed,
     lagUsed,
+    requestedLag,
     standardErrorPerWeek,
     confidenceInterval95: {
       lower: ratePerWeek - margin,
@@ -326,16 +477,24 @@ export function calculateNeweyWestCovariance(fittedModel, requestedLag) {
 }
 
 /**
- * Calculates weight rate of change (lb/week) and Newey-West HAC uncertainty estimates:
- * W_i = alpha + beta * t_i + epsilon_i
+ * Calculates weight rate of change (lb/week), automatic Newey-West HAC uncertainty,
+ * and leave-one-out sensitivity analysis:
+ *   W_i = alpha + beta * t_i + epsilon_i
  * where t is elapsed days from the first observation.
  *
+ * Does not use an arbitrary fixed maximum lag cap. Automatically selects Bartlett
+ * bandwidth L = floor(4 * (n / 100)^(2/9)) with 0 <= L <= n - 1.
+ *
  * Returns a comprehensive domain object reporting:
- * - ratePerWeek: estimated rate of weight change (7 * beta)
+ * - ratePerWeek: estimated OLS rate of weight change (7 * beta)
  * - observationCount: valid observations entering regression (n)
  * - degreesOfFreedom: regression degrees of freedom (df = n - 2)
- * - hac: uncertainty estimates for HAC(7), HAC(14), and HAC(30) observation-index lags
- * - standardErrorPerWeekHac7, confidenceInterval95Hac7 (and 14, 30): direct accessors
+ * - bandwidth: automatically selected HAC bandwidth L
+ * - isSmallSample: boolean flag indicating n < 30
+ * - standardErrorPerWeek: automatic HAC standard error (lb/week)
+ * - confidenceInterval95: 95% CI from automatic HAC
+ * - sensitivity: leave-one-out sensitivity metrics (range, median, without latest, most influential)
+ * - hac: primary automatic HAC uncertainty result with legacy horizon properties preserved
  * - ols: conventional OLS SE and CI diagnostic
  *
  * Returns null if n < minObservations (default 3) or if observation time has zero variance.
@@ -347,30 +506,46 @@ export function calculateWeightTrend(weightHistory, { windowDays = 14, minObserv
   const model = fitLinearRegression(obs);
   if (!model) return null;
 
-  const hac7 = calculateNeweyWestCovariance(model, 7);
-  const hac14 = calculateNeweyWestCovariance(model, 14);
-  const hac30 = calculateNeweyWestCovariance(model, 30);
+  const autoBandwidth = computeAutomaticBandwidth(model.n);
+  const autoHac = calculateNeweyWestCovariance(model, autoBandwidth);
 
-  // OLS diagnostic
+  // Conventional OLS diagnostic
   const tCrit = getStudentTCriticalValue(model.df, 0.95);
   const olsSePerWeek = model.olsSeBeta * 7;
   const olsMargin = tCrit * olsSePerWeek;
+
+  // Leave-one-out sensitivity analysis
+  const sensitivity = calculateSlopeSensitivity(obs, model.ratePerWeek);
+
+  // Backward-compatible HAC proxy preserving legacy horizon lookups
+  const hac = {
+    ...autoHac,
+    bandwidth: autoBandwidth,
+    lagUsed: autoBandwidth,
+    7: calculateNeweyWestCovariance(model, 7),
+    14: calculateNeweyWestCovariance(model, 14),
+    30: calculateNeweyWestCovariance(model, 30),
+    auto: autoHac
+  };
 
   return {
     ratePerWeek: model.ratePerWeek,
     observationCount: model.n,
     degreesOfFreedom: model.df,
-    hac: {
-      7: hac7,
-      14: hac14,
-      30: hac30
-    },
-    standardErrorPerWeekHac7: hac7.standardErrorPerWeek,
-    confidenceInterval95Hac7: hac7.confidenceInterval95,
-    standardErrorPerWeekHac14: hac14.standardErrorPerWeek,
-    confidenceInterval95Hac14: hac14.confidenceInterval95,
-    standardErrorPerWeekHac30: hac30.standardErrorPerWeek,
-    confidenceInterval95Hac30: hac30.confidenceInterval95,
+    bandwidth: autoBandwidth,
+    isSmallSample: model.n < 30,
+    standardErrorPerWeek: autoHac.standardErrorPerWeek,
+    confidenceInterval95: autoHac.confidenceInterval95,
+    hac,
+    standardErrorPerWeekHac: autoHac.standardErrorPerWeek,
+    confidenceInterval95Hac: autoHac.confidenceInterval95,
+    standardErrorPerWeekHac7: hac[7].standardErrorPerWeek,
+    confidenceInterval95Hac7: hac[7].confidenceInterval95,
+    standardErrorPerWeekHac14: hac[14].standardErrorPerWeek,
+    confidenceInterval95Hac14: hac[14].confidenceInterval95,
+    standardErrorPerWeekHac30: hac[30].standardErrorPerWeek,
+    confidenceInterval95Hac30: hac[30].confidenceInterval95,
+    sensitivity,
     ols: {
       standardErrorPerWeek: olsSePerWeek,
       confidenceInterval95: {
