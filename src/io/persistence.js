@@ -19,7 +19,8 @@ import {
   CONSUMPTION_KEY,
   DEFAULT_INGREDIENTS,
   DEFAULT_TARGETS,
-  DEFAULT_MEALS
+  DEFAULT_MEALS,
+  DEFAULT_MAX_TOTAL_ERROR
 } from '../core/state.js';
 import { isValidCustomFoodEntry } from '../core/customFoods.js';
 
@@ -29,7 +30,10 @@ export const Persistence = {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.ingredients));
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
         mealConstraints: state.mealConstraints,
-        weights: state.weights
+        weights: state.weights,
+        maxTotalError: (typeof state.maxTotalError === 'number' && !isNaN(state.maxTotalError) && state.maxTotalError >= 0)
+          ? state.maxTotalError
+          : DEFAULT_MAX_TOTAL_ERROR
       }));
       localStorage.setItem(TARGETS_KEY, JSON.stringify(state.targets));
       localStorage.setItem(MEALS_KEY, JSON.stringify(state.meals));
@@ -97,6 +101,9 @@ export const Persistence = {
           }
           if (parsedSettings.weights && typeof parsedSettings.weights === 'object') {
             Object.assign(state.weights, parsedSettings.weights);
+          }
+          if (typeof parsedSettings.maxTotalError === 'number' && !isNaN(parsedSettings.maxTotalError) && parsedSettings.maxTotalError >= 0) {
+            state.maxTotalError = parsedSettings.maxTotalError;
           }
         }
       }
@@ -224,6 +231,7 @@ export const Persistence = {
     state.ingredients = JSON.parse(JSON.stringify(DEFAULT_INGREDIENTS));
     state.mealConstraints = { minIngredients: 1, maxIngredients: 4 };
     state.weights = { calories: 1.0, protein: 1.0, carbs: 0.5, fat: 0.5, mealAllocation: 0.2, macroReconciliation: 0.5 };
+    state.maxTotalError = DEFAULT_MAX_TOTAL_ERROR;
     state.actuals = {};
     state.eatenItems = {};
     state.weightHistory = {};
@@ -262,6 +270,7 @@ export const ImportExport = {
         mealAllocation: state.weights?.mealAllocation ?? 0.2,
         macroReconciliation: state.weights?.macroReconciliation ?? 0.5
       },
+      maxTotalError: state.maxTotalError ?? DEFAULT_MAX_TOTAL_ERROR,
       weightHistory: state.weightHistory || {},
       intakeHistory: state.intakeHistory || {},
       customFoods: state.customFoods || [],
@@ -320,6 +329,10 @@ export const ImportExport = {
               state.weights[k] = parsed.weights[k];
             }
           });
+        }
+
+        if (typeof parsed.maxTotalError === 'number' && !isNaN(parsed.maxTotalError) && parsed.maxTotalError >= 0) {
+          state.maxTotalError = parsed.maxTotalError;
         }
 
         if (parsed.weightHistory && typeof parsed.weightHistory === 'object' && !Array.isArray(parsed.weightHistory)) {

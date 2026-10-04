@@ -1,0 +1,171 @@
+/* ══════════════════════════════════════════
+   SAFETY CHECKER — Nutritional Error Safety Checker styles
+   Follows the measured-food-card pattern with monochrome palette.
+══════════════════════════════════════════ */
+
+.safety-checker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.safety-checker-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 700px) {
+  .safety-checker-inputs {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .safety-checker-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
+.safety-checker-inputs .field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.safety-checker-inputs label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--silver, #b0b8c0);
+}
+
+.safety-checker-inputs input[type="text"],
+.safety-checker-inputs input[type="number"] {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.88rem;
+  padding: 7px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  color: var(--white, #f0f4f8);
+  transition: border-color 0.15s ease;
+}
+
+.safety-checker-inputs input:focus {
+  border-color: var(--accent, #3b82f6);
+  outline: none;
+}
+
+/* Preview (food lookup) */
+.safety-checker-preview {
+  background: var(--bg2, rgba(40, 40, 40, 0.4));
+  border: 1px solid var(--border-hi, rgba(255, 255, 255, 0.20));
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.15s ease;
+}
+
+.safety-checker-preview.hidden {
+  display: none;
+}
+
+/* Error display */
+.safety-checker-error {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.82rem;
+  color: #fca5a5;
+  animation: fadeIn 0.15s ease;
+}
+
+.safety-checker-error.hidden {
+  display: none;
+}
+
+/* Result display */
+.safety-checker-result {
+  border-radius: 8px;
+  padding: 16px;
+  animation: fadeIn 0.15s ease;
+}
+
+.safety-checker-result.hidden {
+  display: none;
+}
+
+.safety-checker-result.result-yes {
+  background: rgba(180, 220, 180, 0.06);
+  border: 1px solid rgba(180, 220, 180, 0.25);
+}
+
+.safety-checker-result.result-no {
+  background: rgba(200, 60, 50, 0.06);
+  border: 1px solid rgba(200, 60, 50, 0.25);
+}
+
+.safety-result-badge {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 12px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.safety-result-badge.badge-yes {
+  color: var(--green-text, rgba(180, 220, 180, 0.9));
+  background: rgba(180, 220, 180, 0.10);
+  border: 1px solid rgba(180, 220, 180, 0.22);
+}
+
+.safety-result-badge.badge-no {
+  color: var(--red-text, rgba(220, 80, 70, 0.9));
+  background: var(--red, rgba(200, 60, 50, 0.18));
+  border: 1px solid rgba(200, 60, 50, 0.35);
+}
+
+.safety-result-details {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--silver, #d1d1d6);
+  line-height: 1.7;
+}
+
+.safety-result-details .detail-label {
+  color: var(--muted, #8e8e93);
+}
+
+.safety-result-details .detail-value {
+  font-weight: 600;
+  color: var(--white, #ffffff);
+}
+
+.safety-result-details .detail-value.value-yes {
+  color: var(--green-text, rgba(180, 220, 180, 0.9));
+}
+
+.safety-result-details .detail-value.value-no {
+  color: var(--red-text, rgba(220, 80, 70, 0.9));
+}
+
+.safety-result-note {
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.76rem;
+  color: var(--muted, #8e8e93);
+  margin-top: 8px;
+  font-style: italic;
+}
+
+.safety-checker-actions {
+  display: flex;
+  justify-content: flex-end;
+}

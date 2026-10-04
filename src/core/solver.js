@@ -727,7 +727,7 @@ export function solveModel(customState = state, { validate = false, relaxIntegra
     };
   }
 
-  const result = extractResults(raw, { targets, meals, ingredients, actuals, eatenItems });
+  const result = extractResults(raw, { targets, meals, ingredients, actuals, eatenItems, customFoods });
   return {
     feasible: true,
     objective: raw.result,

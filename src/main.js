@@ -374,6 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.renderIngredients();
   UI.renderWeights();
   UI.renderCustomFoods();
+  UI.renderSafetyCheckerSection();
   UI.renderWeightTab();
   if (state.result) {
     UI.renderResults();

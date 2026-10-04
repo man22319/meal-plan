@@ -42,6 +42,7 @@ import { runSolverTestSuite } from './solver.test.js';
 import { runMeasuredFoodsTestSuite } from './measured_foods.test.js';
 import { runStatsTestSuite } from './stats.test.js';
 import { runCollapsibleSectionsTestSuite } from './collapsible_sections.test.js';
+import { runSafetyCheckerTestSuite } from './safety_checker.test.js';
 
 runSolverTestSuite();
 runCustomFoodsTestSuite();
@@ -52,6 +53,7 @@ runMeasuredFoodsTestSuite();
 runStatsTestSuite();
 runFormattersTests();
 runCollapsibleSectionsTestSuite();
+runSafetyCheckerTestSuite();
 
 // Base nutritional target
 export const DAILY_TARGET = {

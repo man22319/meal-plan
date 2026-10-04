@@ -159,6 +159,8 @@ export const DEFAULT_INGREDIENTS = [
   { id: 'ing_milk', name: 'Whole Milk', servingSize: 240, unit: 'mL', calories: 150, protein: 8, carbs: 12, fat: 8, minServings: 0, maxServings: 2, quantityMode: 'continuous', availability: 'normal' }
 ];
 
+export const DEFAULT_MAX_TOTAL_ERROR = 3.0;
+
 export const state = {
   targets: JSON.parse(JSON.stringify(DEFAULT_TARGETS)),
   meals: JSON.parse(JSON.stringify(DEFAULT_MEALS)),
@@ -175,6 +177,7 @@ export const state = {
     availabilityLow: 0.0005,
     availabilityLimited: 0.002
   },
+  maxTotalError: DEFAULT_MAX_TOTAL_ERROR,
   actuals: {},
   eatenItems: {},
   weightHistory: {},

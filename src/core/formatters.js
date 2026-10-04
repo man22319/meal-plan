@@ -30,7 +30,7 @@ function formatItemMacro(val) {
 /**
  * Formats physical quantity (e.g. 100, 154.5, 240).
  */
-function formatQuantity(qty) {
+export function formatQuantity(qty) {
   if (typeof qty !== 'number' || isNaN(qty)) return '0';
   const rounded = Math.round(qty * 10) / 10;
   if (Math.abs(rounded - Math.round(rounded)) < 0.001) {

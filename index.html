@@ -164,10 +164,46 @@
         </div>
       </section>
 
-      <!-- 5. SOLVE -->
-      <div class="solve-row">
-        <button class="btn btn-primary" id="solve-btn">SOLVE</button>
-      </div>
+      <!-- 4c. NUTRITIONAL ERROR SAFETY CHECKER -->
+      <section class="section" id="safety-checker-section">
+        <div class="section-header">
+          <span>Nutritional Error Safety Checker</span>
+        </div>
+        <div class="section-content">
+          <div class="section-content-inner">
+            <div class="card safety-checker-card">
+              <div class="safety-checker-inputs">
+                <div class="field-group">
+                  <label for="safety-food-id-input">Food ID</label>
+                  <input type="text" id="safety-food-id-input" placeholder="e.g. 7F9K" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="field-group">
+                  <label for="safety-amount-input">Amount</label>
+                  <div class="amount-unit-row">
+                    <input type="number" id="safety-amount-input" min="0" step="any" placeholder="200" inputmode="decimal" />
+                    <select id="safety-unit-select" class="unit-select">
+                      <option value="g" selected>g</option>
+                      <option value="mL">mL</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label for="safety-threshold-input">Max Allowed Error %</label>
+                  <input type="number" id="safety-threshold-input" min="0" step="any" placeholder="3" inputmode="decimal" />
+                </div>
+              </div>
+
+              <div id="safety-checker-preview" class="safety-checker-preview hidden"></div>
+              <div id="safety-checker-error" class="safety-checker-error hidden"></div>
+              <div id="safety-checker-result" class="safety-checker-result hidden"></div>
+
+              <div class="safety-checker-actions">
+                <button type="button" class="btn btn-primary" id="check-safety-btn">CHECK SAFETY</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- ═══ ERRORS ═══ -->
       <section class="section hidden" id="error-section">
@@ -192,6 +228,9 @@
             <div id="unassigned-custom-cards"></div>
             <div id="consumption-container" class="consumption-container hidden"></div>
             <div id="daily-summary"></div>
+            <div class="solve-row">
+              <button class="btn btn-primary" id="solve-btn">SOLVE</button>
+            </div>
             <div class="approx-notice hidden" id="approx-notice"></div>
             <div id="solver-debug-container" class="solver-debug-container"></div>
           </div>

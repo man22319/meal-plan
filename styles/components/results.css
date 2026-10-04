@@ -4,12 +4,7 @@
 ══════════════════════════════════════════ */
 
 #results-section {
-  display: none;
   scroll-margin-top: 80px;
-}
-
-#results-section.visible {
-  display: block;
 }
 
 .results-reminder {

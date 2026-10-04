@@ -1,6 +1,7 @@
-import { resolveAvailability, state, generateIngredientId, generateStateFingerprint, ensureIngredientId, findIngredientById, COLLAPSE_KEY, COLLAPSE_KEY_PREFIX } from '../core/state.js';
+import { resolveAvailability, state, generateIngredientId, generateStateFingerprint, ensureIngredientId, findIngredientById, COLLAPSE_KEY, COLLAPSE_KEY_PREFIX, DEFAULT_MAX_TOTAL_ERROR } from '../core/state.js';
 import { Persistence } from '../io/persistence.js';
 import { Optimization } from '../core/solver.js';
+import { checkNutritionalSafety } from '../core/safetyChecker.js';
 import { bindPressAndHold } from './pressHold.js';
 import { getRecommendationsAsync, applyRecommendation } from '../recommendation/recommendation.js';
 import {
@@ -2660,6 +2661,16 @@ export const UI = {
     if (section) section.classList.remove('visible');
     const uneatenAllBtn = document.getElementById('uneaten-all-btn');
     if (uneatenAllBtn) uneatenAllBtn.disabled = true;
+    const cardsEl = document.getElementById('meal-result-cards');
+    if (cardsEl) cardsEl.innerHTML = '';
+    const unassignedEl = document.getElementById('unassigned-custom-cards');
+    if (unassignedEl) unassignedEl.innerHTML = '';
+    const dailySummaryEl = document.getElementById('daily-summary');
+    if (dailySummaryEl) dailySummaryEl.innerHTML = '';
+    const approxNotice = document.getElementById('approx-notice');
+    if (approxNotice) approxNotice.classList.add('hidden');
+    const debugContainer = document.getElementById('solver-debug-container');
+    if (debugContainer) debugContainer.innerHTML = '';
     const consumptionContainer = document.getElementById('consumption-container');
     if (consumptionContainer) {
       consumptionContainer.classList.add('hidden');
@@ -3119,6 +3130,174 @@ export const UI = {
     });
   },
 
+  // ── SAFETY CHECKER ──
+
+  updateSafetyCheckerPreview() {
+    const idInput = document.getElementById('safety-food-id-input');
+    const previewEl = document.getElementById('safety-checker-preview');
+    const errorEl = document.getElementById('safety-checker-error');
+
+    if (!idInput || !previewEl || !errorEl) return;
+
+    const idVal = idInput.value.trim();
+    if (!idVal) {
+      previewEl.classList.add('hidden');
+      previewEl.innerHTML = '';
+      errorEl.classList.add('hidden');
+      errorEl.textContent = '';
+      return;
+    }
+
+    const ing = findIngredientById(idVal, state.ingredients);
+    if (!ing) {
+      previewEl.classList.add('hidden');
+      previewEl.innerHTML = '';
+      errorEl.classList.remove('hidden');
+      errorEl.textContent = 'That Food ID does not exist. Check the ID shown on the ingredient card and try again.';
+      return;
+    }
+
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+
+    const ingServingSize = Number(ing.servingSize) || 100;
+    previewEl.classList.remove('hidden');
+    previewEl.innerHTML = `
+      <div class="preview-header">
+        <span class="preview-found-title">Found: ${esc(ing.name)}</span>
+        <span class="preview-serving-info">ID: ${esc(ing.id)} · Serving size: ${ingServingSize} ${esc(ing.unit)}</span>
+      </div>
+    `;
+  },
+
+  renderSafetyCheckerSection() {
+    const idInput = document.getElementById('safety-food-id-input');
+    const amountInput = document.getElementById('safety-amount-input');
+    const unitSelect = document.getElementById('safety-unit-select');
+    const thresholdInput = document.getElementById('safety-threshold-input');
+    const checkBtn = document.getElementById('check-safety-btn');
+    const resultEl = document.getElementById('safety-checker-result');
+    const errorEl = document.getElementById('safety-checker-error');
+
+    if (!idInput || !amountInput || !unitSelect || !thresholdInput || !checkBtn) return;
+
+    // Restore persisted threshold
+    const currentThreshold = state.maxTotalError ?? DEFAULT_MAX_TOTAL_ERROR;
+    if (!thresholdInput.value) {
+      thresholdInput.value = currentThreshold;
+    }
+
+    // Bind live preview on Food ID input
+    if (!idInput.dataset.safetyBound) {
+      idInput.dataset.safetyBound = 'true';
+      idInput.addEventListener('input', () => UI.updateSafetyCheckerPreview());
+    }
+
+    // Persist threshold on change
+    if (!thresholdInput.dataset.safetyBound) {
+      thresholdInput.dataset.safetyBound = 'true';
+      const persistThreshold = () => {
+        const val = Number(thresholdInput.value);
+        if (!isNaN(val) && isFinite(val) && val >= 0) {
+          state.maxTotalError = val;
+          Persistence.save();
+        }
+      };
+      thresholdInput.addEventListener('change', persistThreshold);
+      thresholdInput.addEventListener('blur', persistThreshold);
+    }
+
+    // Check Safety button
+    if (!checkBtn.dataset.safetyBound) {
+      checkBtn.dataset.safetyBound = 'true';
+      checkBtn.addEventListener('click', () => {
+        // Clear previous results
+        if (resultEl) {
+          resultEl.classList.add('hidden');
+          resultEl.innerHTML = '';
+          resultEl.className = 'safety-checker-result hidden';
+        }
+        if (errorEl) {
+          errorEl.classList.add('hidden');
+          errorEl.textContent = '';
+        }
+
+        const foodId = idInput.value.trim();
+        const amount = amountInput.value.trim();
+        const unit = unitSelect.value;
+        const threshold = thresholdInput.value.trim();
+
+        // Validate threshold first
+        if (threshold === '' || isNaN(Number(threshold)) || !isFinite(Number(threshold)) || Number(threshold) < 0) {
+          if (errorEl) {
+            errorEl.classList.remove('hidden');
+            errorEl.textContent = 'Maximum allowed error must be a non-negative number.';
+          }
+          return;
+        }
+
+        // Persist threshold
+        const threshNum = Number(threshold);
+        state.maxTotalError = threshNum;
+        Persistence.save();
+
+        const outcome = checkNutritionalSafety(foodId, amount, unit, threshNum, state);
+
+        if (!outcome.success) {
+          if (errorEl) {
+            errorEl.classList.remove('hidden');
+            errorEl.textContent = outcome.error;
+          }
+          return;
+        }
+
+        if (!resultEl) return;
+
+        if (outcome.compatible) {
+          // YES result
+          const errorPct = outcome.totalError.toFixed(2);
+          const threshPct = outcome.threshold.toFixed(2);
+          const estimateNote = outcome.hasEstimates
+            ? '<div class="safety-result-note">Result is deterministic under the model\'s assumptions. Some nutritional values are marked as estimated.</div>'
+            : '<div class="safety-result-note">Result is deterministic under the current model.</div>';
+
+          resultEl.innerHTML = `
+            <div class="safety-result-badge badge-yes">YES — within error limit</div>
+            <div class="safety-result-details">
+              <span class="detail-label">Requested:</span> <span class="detail-value">${esc(String(outcome.requestedAmount))} ${esc(outcome.unit)}</span> of <span class="detail-value">${esc(outcome.foodName)}</span><br>
+              <span class="detail-label">Maximum allowed error:</span> <span class="detail-value">${threshPct}%</span><br>
+              <span class="detail-label">Resulting total error:</span> <span class="detail-value value-yes">${errorPct}%</span>
+            </div>
+            ${estimateNote}
+          `;
+          resultEl.className = 'safety-checker-result result-yes';
+        } else {
+          // NO result
+          const errorPct = isFinite(outcome.totalError) ? outcome.totalError.toFixed(2) : '∞';
+          const threshPct = outcome.threshold.toFixed(2);
+          const maxAmt = outcome.maxSafeAmount;
+          const maxErrPct = isFinite(outcome.resultingErrorAtMax) ? outcome.resultingErrorAtMax.toFixed(2) : '—';
+          const estimateNote = outcome.hasEstimates
+            ? '<div class="safety-result-note">Result is deterministic under the model\'s assumptions. Some nutritional values are marked as estimated.</div>'
+            : '<div class="safety-result-note">Result is deterministic under the current model.</div>';
+
+          resultEl.innerHTML = `
+            <div class="safety-result-badge badge-no">NO — exceeds error limit</div>
+            <div class="safety-result-details">
+              <span class="detail-label">Requested:</span> <span class="detail-value">${esc(String(outcome.requestedAmount))} ${esc(outcome.unit)}</span> of <span class="detail-value">${esc(outcome.foodName)}</span><br>
+              <span class="detail-label">Resulting total error:</span> <span class="detail-value value-no">${errorPct}%</span><br>
+              <span class="detail-label">Maximum allowed error:</span> <span class="detail-value">${threshPct}%</span><br>
+              <span class="detail-label">Maximum safe amount:</span> <span class="detail-value value-yes">${maxAmt} ${esc(outcome.unit)}</span><br>
+              <span class="detail-label">Error at maximum:</span> <span class="detail-value">${maxErrPct}%</span>
+            </div>
+            ${estimateNote}
+          `;
+          resultEl.className = 'safety-checker-result result-no';
+        }
+      });
+    }
+  },
+
   // ── COLLAPSIBLE SECTIONS ──
 
   /**
@@ -3138,6 +3317,7 @@ export const UI = {
     'weights-section',
     'custom-foods-section',
     'measured-food-section',
+    'safety-checker-section',
     'results-section',
     'consumption-container'
   ],

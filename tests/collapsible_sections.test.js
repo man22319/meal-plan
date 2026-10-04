@@ -27,6 +27,7 @@ export function runCollapsibleSectionsTestSuite() {
     'weights-section',
     'custom-foods-section',
     'measured-food-section',
+    'safety-checker-section',
     'results-section',
     'consumption-container'
   ];
@@ -38,7 +39,7 @@ export function runCollapsibleSectionsTestSuite() {
       const isCollapsed = UI.getCollapseState(sectionId);
       assert.strictEqual(isCollapsed, false, `Section ${sectionId} must default to expanded (false)`);
     }
-    console.log('[CS-1] Default State: All 7 sections default to expanded for first-time users - PASSED');
+    console.log('[CS-1] Default State: All 8 sections default to expanded for first-time users - PASSED');
   }
 
   // ── [CS-2] Independent Persistence Keys ──
@@ -94,6 +95,7 @@ export function runCollapsibleSectionsTestSuite() {
       'weights-section': true,
       'custom-foods-section': false,
       'measured-food-section': true,
+      'safety-checker-section': false,
       'results-section': false,
       'consumption-container': true
     };
@@ -111,8 +113,9 @@ export function runCollapsibleSectionsTestSuite() {
   // ── [CS-5] Reload & Browser Session Persistence ──
   {
     store.clear();
-    // Simulate user collapsing custom foods, results, and consolidated consumption
+    // Simulate user collapsing custom foods, safety checker, results, and consolidated consumption
     UI.setCollapseState('custom-foods-section', true);
+    UI.setCollapseState('safety-checker-section', true);
     UI.setCollapseState('results-section', true);
     UI.setCollapseState('consumption-container', true);
 
@@ -122,7 +125,7 @@ export function runCollapsibleSectionsTestSuite() {
     // Simulate page reload: re-read states from storage
     for (const sectionId of EXPECTED_SECTIONS) {
       const persisted = storageSnapshot.get(`${COLLAPSE_KEY_PREFIX}${sectionId}`);
-      const expected = (sectionId === 'custom-foods-section' || sectionId === 'results-section' || sectionId === 'consumption-container');
+      const expected = (sectionId === 'custom-foods-section' || sectionId === 'safety-checker-section' || sectionId === 'results-section' || sectionId === 'consumption-container');
       assert.strictEqual(persisted === 'true', expected, `Persisted key for ${sectionId} mismatch on reload`);
     }
     console.log('[CS-5] Persistence Across Reloads & Sessions: Stored states restored accurately - PASSED');
@@ -237,8 +240,14 @@ export function runCollapsibleSectionsTestSuite() {
     assert.strictEqual(UI.toggleSectionCollapse('consumption-container'), true);
     assert.strictEqual(UI.getCollapseState('consumption-container'), true);
 
-    assert.strictEqual(UI.toggleSectionCollapse('consumption-container'), false);
-    assert.strictEqual(UI.getCollapseState('consumption-container'), false);
+    // Test safety-checker-section toggle
+    assert.strictEqual(UI.toggleSectionCollapse('safety-checker-section'), true);
+    assert.strictEqual(docStore['safety-checker-section'].classList.contains('collapsed'), true);
+    assert.strictEqual(UI.getCollapseState('safety-checker-section'), true);
+
+    assert.strictEqual(UI.toggleSectionCollapse('safety-checker-section'), false);
+    assert.strictEqual(docStore['safety-checker-section'].classList.contains('collapsed'), false);
+    assert.strictEqual(UI.getCollapseState('safety-checker-section'), false);
 
     console.log('[CS-6] DOM & Accessibility Integration: Class toggles, aria-expanded, and keys work - PASSED');
   }
